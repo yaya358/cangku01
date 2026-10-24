@@ -33,5 +33,7 @@ declare module 'fastify' {
     config: AppConfig;
     /** 实际读到的配置文件绝对路径，按合并顺序排列 */
     configSources: readonly string[];
+    /** 实际生效的环境变量名（覆盖了 yaml 的那些） */
+    configOverrides: readonly string[];
   }
 }

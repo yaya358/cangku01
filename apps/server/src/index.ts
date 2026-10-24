@@ -74,12 +74,22 @@ async function main(): Promise<void> {
   const config = loaded.config;
   const logger = createLogger(loggerConfigFromApp(config));
 
-  const app = await buildApp({ config, configSources: loaded.sources, logger });
+  const app = await buildApp({
+    config,
+    configSources: loaded.sources,
+    configOverrides: loaded.overrides,
+    logger,
+  });
   installProcessGuards(app, logger);
 
   logger.info(
-    { configDir: loaded.configDir, sources: loaded.sources, env: config.app.env },
-    `配置已加载（${loaded.sources.length} 个文件）`,
+    {
+      configDir: loaded.configDir,
+      sources: loaded.sources,
+      overrides: loaded.overrides,
+      env: config.app.env,
+    },
+    `配置已加载（${loaded.sources.length} 个文件，${loaded.overrides.length} 个环境变量覆盖）`,
   );
 
   await app.listen({ host: config.server.host, port: config.server.port });

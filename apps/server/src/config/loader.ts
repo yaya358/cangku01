@@ -10,9 +10,28 @@ export const DEFAULT_CONFIG_FILE = 'default.yaml';
 export const USER_CONFIG_FILE = 'user.yaml';
 /** 允许用环境变量指定配置目录（部署时常见）。 */
 export const CONFIG_DIR_ENV = 'TAVERN_CONFIG_DIR';
+/** 覆盖配置用的环境变量前缀，例如 TAVERN_SERVER__PORT=9000 */
+export const ENV_PREFIX = 'TAVERN_';
+/** 层级分隔符：一律用双下划线，避免和「字段名本身含下划线」混淆 */
+export const ENV_SEPARATOR = '__';
 
 /** 向上查找配置目录的最大层数，防止在奇怪的工作目录下一直爬到根。 */
 const MAX_LOOKUP_DEPTH = 6;
+
+/**
+ * 不带前缀也认的通用变量。
+ *
+ * 目的是兼容部署平台惯例（PaaS 通常只注入 PORT / NODE_ENV），
+ * 同时保证语义与 yaml 字段一一对应。
+ */
+const ENV_ALIASES: Readonly<Record<string, string>> = {
+  PORT: 'server.port',
+  HOST: 'server.host',
+  NODE_ENV: 'app.env',
+};
+
+/** 只描述「去哪里找配置」，不参与覆盖，所以不计入 overrides。 */
+const ENV_META_KEYS = new Set<string>([CONFIG_DIR_ENV]);
 
 type PlainObject = Record<string, unknown>;
 
@@ -23,6 +42,8 @@ export interface LoadedConfig {
   configDir: string;
   /** 实际读到的配置文件（绝对路径，按合并顺序） */
   sources: string[];
+  /** 实际生效的环境变量名，便于排查「线上为什么和本地不一样」 */
+  overrides: string[];
 }
 
 /** 配置加载/校验失败。issues 里每一条都能直接展示给用户。 */
@@ -105,6 +126,81 @@ export function resolveConfigDir(
   ]);
 }
 
+/** 把 ENV_SEPARATOR 分隔的一段转成 camelCase：BODY_LIMIT_MB → bodyLimitMb。 */
+function toCamelCase(segment: string): string {
+  const parts = segment.toLowerCase().split('_').filter(Boolean);
+  return parts
+    .map((part, index) => (index === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join('');
+}
+
+/**
+ * 环境变量的值都是字符串，这里尽量还原成 JSON 里的类型。
+ *
+ * '8787' → 8787、'true' → true、'null' → null、'["a"]' → ['a']；
+ * 解析不了就保留字符串（例如日志级别 debug）。这样 schema 拿到的类型是对的，
+ * 用户也不会因为「配置里写了端口却变成字符串」被 zod 拦下。
+ */
+export function coerceEnvValue(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (trimmed === '') return '';
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+/** 按点路径写入嵌套对象，中间层不存在就补上。 */
+function setByPath(target: PlainObject, segments: readonly string[], value: unknown): void {
+  let cursor = target;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const key = segments[index] as string;
+    if (!isPlainObject(cursor[key])) cursor[key] = {};
+    cursor = cursor[key] as PlainObject;
+  }
+  cursor[segments[segments.length - 1] as string] = value;
+}
+
+/**
+ * 扫描环境变量，生成覆盖层。
+ *
+ * 支持两种写法：
+ *   TAVERN_SERVER__PORT=9000   → server.port
+ *   TAVERN_FEATURES__PLUGINS=true → features.plugins
+ * 以及 PORT / HOST / NODE_ENV 三个通用别名。
+ */
+export function collectEnvOverrides(env: Record<string, string | undefined>): {
+  values: PlainObject;
+  names: string[];
+} {
+  const values: PlainObject = {};
+  const names: string[] = [];
+
+  for (const [rawKey, rawValue] of Object.entries(env)) {
+    if (rawValue === undefined) continue;
+
+    const key = rawKey.toUpperCase();
+    if (ENV_META_KEYS.has(key)) continue;
+
+    let segments: string[];
+    if (key.startsWith(ENV_PREFIX)) {
+      const rest = key.slice(ENV_PREFIX.length);
+      if (rest.length === 0) continue;
+      segments = rest.split(ENV_SEPARATOR).map(toCamelCase);
+    } else if (ENV_ALIASES[key]) {
+      segments = (ENV_ALIASES[key] as string).split('.');
+    } else {
+      continue;
+    }
+
+    setByPath(values, segments, coerceEnvValue(rawValue));
+    names.push(rawKey);
+  }
+
+  return { values, names: names.sort() };
+}
+
 /** 读一个 yaml 文件并保证顶层是对象；解析错误带上行列号。 */
 function readYamlObject(filePath: string): PlainObject {
   let text: string;
@@ -140,9 +236,10 @@ function readYamlObject(filePath: string): PlainObject {
  * 加载配置。
  *
  * 合并顺序（后者覆盖前者）：
- *   内置默认值 → config/default.yaml → config/user.yaml → 环境变量（见后续阶段）
+ *   内置默认值 → config/default.yaml → config/user.yaml → 环境变量
  *
- * default.yaml 缺失时不会失败：直接退回内置默认值，让「刚 clone 下来」也能跑。
+ * default.yaml 缺失时不会失败：退回内置默认值，保证「刚 clone 下来」也能跑。
+ * 环境变量放在最后，是为了让容器/CI 能在不改文件的前提下压过任何一层。
  */
 export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
   const env = options.env ?? process.env;
@@ -163,6 +260,9 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
     sources.push(userFile);
   }
 
+  const envOverrides = collectEnvOverrides(env);
+  merged = deepMerge(merged, envOverrides.values);
+
   // 即使一个文件都没读到，schema 里的默认值也能把 merged 补成完整配置
   const parsed = AppConfigSchema.safeParse(merged);
   if (!parsed.success) {
@@ -173,5 +273,5 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
     throw new ConfigError('配置校验失败', issues);
   }
 
-  return { config: parsed.data, configDir, sources };
+  return { config: parsed.data, configDir, sources, overrides: envOverrides.names };
 }

@@ -121,6 +121,78 @@ describe('loadConfig 校验', () => {
   });
 });
 
+describe('环境变量覆盖', () => {
+  it('TAVERN_ 前缀 + 双下划线可以覆盖任意深度的字段，且类型被还原', () => {
+    const dir = makeTempConfigDir({
+      [DEFAULT_CONFIG_FILE]: 'server:\n  port: 8787\nlogging:\n  level: info\n',
+    });
+
+    const loaded = loadConfig({
+      configDir: dir,
+      env: { TAVERN_SERVER__PORT: '9999', TAVERN_LOGGING__LEVEL: 'debug' },
+    });
+
+    expect(loaded.config.server.port).toBe(9999); // 数字，不是字符串
+    expect(loaded.config.logging.level).toBe('debug');
+    expect(loaded.overrides).toEqual(['TAVERN_LOGGING__LEVEL', 'TAVERN_SERVER__PORT']);
+  });
+
+  it('环境变量优先级高于 user.yaml', () => {
+    const dir = makeTempConfigDir({
+      [DEFAULT_CONFIG_FILE]: 'server:\n  port: 8787\n',
+      [USER_CONFIG_FILE]: 'server:\n  port: 9000\n',
+    });
+
+    const loaded = loadConfig({ configDir: dir, env: { TAVERN_SERVER__PORT: '9100' } });
+    expect(loaded.config.server.port).toBe(9100);
+  });
+
+  it('通用别名 PORT / NODE_ENV 也生效', () => {
+    const dir = makeTempConfigDir({ [DEFAULT_CONFIG_FILE]: 'app:\n  env: development\n' });
+
+    const loaded = loadConfig({ configDir: dir, env: { PORT: '9200', NODE_ENV: 'production' } });
+    expect(loaded.config.server.port).toBe(9200);
+    expect(loaded.config.app.env).toBe('production');
+  });
+
+  it('布尔与字符串数组也能通过环境变量给', () => {
+    const dir = makeTempConfigDir({ [DEFAULT_CONFIG_FILE]: 'server:\n  port: 8787\n' });
+
+    const loaded = loadConfig({
+      configDir: dir,
+      env: {
+        TAVERN_FEATURES__PLUGINS: 'true',
+        TAVERN_SERVER__CORS_ORIGINS: '["http://a.test","http://b.test"]',
+      },
+    });
+
+    expect(loaded.config.features).toEqual({ plugins: true });
+    expect(loaded.config.server.corsOrigins).toEqual(['http://a.test', 'http://b.test']);
+  });
+
+  it('环境变量给了非法值时同样被 schema 拦下', () => {
+    const dir = makeTempConfigDir({ [DEFAULT_CONFIG_FILE]: 'server:\n  port: 8787\n' });
+
+    try {
+      loadConfig({ configDir: dir, env: { TAVERN_SERVER__PORT: 'not-a-number' } });
+      expect.unreachable('应当抛出 ConfigError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).issues.some((issue) => issue.startsWith('server.port'))).toBe(
+        true,
+      );
+    }
+  });
+
+  it('TAVERN_CONFIG_DIR 只用于定位目录，不算作配置覆盖', () => {
+    const dir = makeTempConfigDir({ [DEFAULT_CONFIG_FILE]: 'server:\n  port: 8787\n' });
+
+    const loaded = loadConfig({ env: { TAVERN_CONFIG_DIR: dir } });
+    expect(loaded.configDir).toBe(path.resolve(dir));
+    expect(loaded.overrides).toEqual([]);
+  });
+});
+
 describe('deepMerge', () => {
   it('undefined 不覆盖已有值', () => {
     const merged = deepMerge({ a: 1, b: { c: 2 } }, { a: undefined, b: { c: 3 } });

@@ -24,6 +24,8 @@ export interface BuildAppOptions {
   logger?: Logger;
   /** 实际读到的配置文件路径，仅用于展示与健康检查 */
   configSources?: readonly string[];
+  /** 实际生效的环境变量名，仅用于展示与健康检查 */
+  configOverrides?: readonly string[];
   /** 启动前预置的扩展；后续各业务模块通过它挂进核心 */
   extensions?: readonly Extension[];
 }
@@ -50,6 +52,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
   // 依赖通过装饰器挂载，路由与钩子直接 app.config / app.extensions 取用
   app.decorate('config', config);
   app.decorate('configSources', options.configSources ?? []);
+  app.decorate('configOverrides', options.configOverrides ?? []);
 
   /**
    * 扩展点注册表。

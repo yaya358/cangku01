@@ -18,6 +18,7 @@ function buildTestApp(extra: { extensions?: Parameters<typeof buildApp>[0]['exte
   return buildApp({
     config: testConfig(),
     configSources: [`${process.cwd()}/config/default.yaml`],
+    configOverrides: ['TAVERN_SERVER__PORT'],
     logger: silentLogger,
     extensions: extra.extensions,
   });
@@ -58,6 +59,7 @@ describe('GET /api/health', () => {
       const configCheck = body.data.checks.find((item) => item.name === 'config');
       expect(configCheck?.status).toBe('ok');
       expect(configCheck?.message).toContain('1 个配置文件');
+      expect(configCheck?.message).toContain('1 个环境变量覆盖');
     } finally {
       await app.close();
     }

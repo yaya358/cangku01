@@ -14,6 +14,8 @@ export interface HealthDeps {
   extensions: HealthExtensions;
   /** 实际读到的配置文件路径，用来显示「配置从哪来」 */
   configSources: readonly string[];
+  /** 实际生效的环境变量名 */
+  configOverrides: readonly string[];
 }
 
 /** 一项自检的定义。返回值允许是 Promise，方便后续接存储探活。 */
@@ -26,14 +28,14 @@ interface CheckDefinition {
 const DEFINITIONS: readonly CheckDefinition[] = [
   {
     name: 'config',
-    run: ({ configSources, config }) => ({
-      name: 'config',
-      status: 'ok',
-      message:
-        configSources.length === 0
-          ? `内置默认值 · ${config.app.env}`
-          : `${configSources.length} 个配置文件 · ${config.app.env}`,
-    }),
+    run: ({ configSources, configOverrides, config }) => {
+      // 让前端与运维一眼看出「这份配置是几个文件 + 几个环境变量拼出来的」
+      const parts: string[] = [];
+      parts.push(configSources.length === 0 ? '内置默认值' : `${configSources.length} 个配置文件`);
+      if (configOverrides.length > 0) parts.push(`${configOverrides.length} 个环境变量覆盖`);
+      parts.push(config.app.env);
+      return { name: 'config', status: 'ok', message: parts.join(' · ') };
+    },
   },
   {
     name: 'memory',
@@ -118,6 +120,7 @@ export function registerHealthRoutes(app: AppInstance): void {
       await buildHealthPayload({
         config: app.config,
         configSources: app.configSources,
+        configOverrides: app.configOverrides,
         extensions: app.extensions.summary(),
       }),
     ),
