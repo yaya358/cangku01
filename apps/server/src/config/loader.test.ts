@@ -36,11 +36,24 @@ afterEach(() => {
 
 describe('loadConfig 合并顺序', () => {
   it('仓库里的 default.yaml 与代码内置默认值完全一致（防漂移）', () => {
-    const loaded = loadConfig({ configDir: repoConfigDir, env: {} });
+    // 跳过 user.yaml：开发者本机的个人配置（可能含密钥）不该影响这条断言
+    const loaded = loadConfig({ configDir: repoConfigDir, env: {}, skipUserConfig: true });
 
     expect(loaded.sources).toContain(path.join(repoConfigDir, DEFAULT_CONFIG_FILE));
     // 注释掉的字段（如 logging.pretty）两边都应是 undefined，所以可以直接深比较
     expect(loaded.config).toEqual(createDefaultConfig());
+  });
+
+  it('空段落（整段被注释掉）不会把默认值覆盖成 null', () => {
+    const dir = makeTempConfigDir({
+      [DEFAULT_CONFIG_FILE]: 'server:\n  port: 8787\n',
+      // YAML 会把只有注释的段落解析成 null
+      [USER_CONFIG_FILE]: 'server:\n  # port: 9000\nlogging:\n  # level: debug\n',
+    });
+
+    const loaded = loadConfig({ configDir: dir, env: {} });
+    expect(loaded.config.server.port).toBe(8787);
+    expect(loaded.config.logging.level).toBe('info');
   });
 
   it('user.yaml 深合并：只改 port，其余继承 default', () => {

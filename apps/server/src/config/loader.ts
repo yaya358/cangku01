@@ -66,6 +66,11 @@ export interface LoadConfigOptions {
   configDir?: string;
   /** 环境变量来源，默认 process.env；测试传 {} 可隔离宿主环境 */
   env?: Record<string, string | undefined>;
+  /**
+   * 忽略 config/user.yaml。
+   * 用途：测试与 CI 不应被开发者本机的个人配置（含密钥）影响。
+   */
+  skipUserConfig?: boolean;
 }
 
 function isPlainObject(value: unknown): value is PlainObject {
@@ -76,17 +81,32 @@ function isPlainObject(value: unknown): value is PlainObject {
  * 递归合并配置。
  *
  * 语义：对象逐层合并，数组与标量直接覆盖（用户填的 [a,b] 不应该和默认值拼起来）。
- * undefined 视为「没填」，不覆盖已有值——这样 yaml 里留空的键不会把默认值清掉。
+ *
+ * 两个「看起来有值其实没有」的坑单独处理：
+ *   - undefined：视为没填，不覆盖（JS 里的可选属性）
+ *   - null 打在**对象型字段**上：视为没填。典型场景是用户写了
+ *       server:
+ *         # port: 8788   ← 全被注释掉
+ *     YAML 会解析成 server: null，直接当值覆盖进去整个 server 段就没了。
+ *     而 logging.file: null 这种「叶子字段的真值」不受影响，因为它的默认值是标量。
  */
 export function deepMerge<TValue>(base: TValue, override: unknown): TValue {
+  if (override === undefined) return base;
+  // base 是对象而 override 是 null → 用户写了个空段落，保持 base 不变
+  if (isPlainObject(base) && override === null) return base;
+
   if (!isPlainObject(base) || !isPlainObject(override)) {
-    return (override === undefined ? base : (override as TValue)) as TValue;
+    return override as TValue;
   }
 
   const result: PlainObject = { ...base };
   for (const [key, value] of Object.entries(override)) {
     if (value === undefined) continue;
     const existing = result[key];
+    // 段落级 null（整段被注释掉）视为未填写：
+    // 键在 base 里不存在，或 base 里是对象，都说明用户并不想改变这一段。
+    // 叶子字段的 null（如 logging.file: null）会落到下面的赋值，语义正常保留。
+    if (value === null && (existing === undefined || isPlainObject(existing))) continue;
     result[key] =
       isPlainObject(existing) && isPlainObject(value) ? deepMerge(existing, value) : value;
   }
@@ -255,7 +275,7 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
   }
 
   const userFile = path.join(configDir, USER_CONFIG_FILE);
-  if (fs.existsSync(userFile)) {
+  if (!options.skipUserConfig && fs.existsSync(userFile)) {
     merged = deepMerge(merged, readYamlObject(userFile));
     sources.push(userFile);
   }
