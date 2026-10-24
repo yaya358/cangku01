@@ -1,0 +1,18 @@
+{
+  "name": "@tavern/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "酒馆 AI 后端：Fastify + TypeScript",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@tavern/shared": "workspace:*"
+  }
+}

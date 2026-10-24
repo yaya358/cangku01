@@ -1,0 +1,29 @@
+{
+  "name": "tavern-ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "酒馆 AI —— 本地优先的 AI 角色扮演酒馆（Vue3 + Fastify + TypeScript）",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @tavern/shared --filter @tavern/server run dev",
+    "dev:server": "pnpm --filter @tavern/server run dev",
+    "build": "pnpm -r run build",
+    "start": "pnpm --filter @tavern/server run start",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
