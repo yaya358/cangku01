@@ -15,3 +15,12 @@ export const DEFAULT_WEB_PORT = 5173;
 
 /** 健康检查接口路径。 */
 export const HEALTH_ENDPOINT = `${API_PREFIX}/health`;
+
+/** provider 列表接口路径。 */
+export const PROVIDERS_ENDPOINT = `${API_PREFIX}/providers`;
+
+/** 非流式对话接口路径。 */
+export const CHAT_ENDPOINT = `${API_PREFIX}/chat`;
+
+/** 流式对话接口路径（SSE）。 */
+export const CHAT_STREAM_ENDPOINT = `${API_PREFIX}/chat/stream`;

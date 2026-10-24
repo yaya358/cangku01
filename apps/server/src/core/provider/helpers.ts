@@ -45,10 +45,14 @@ export function firstProvider(registry: ExtensionRegistry): ProviderAdapter | un
   return listProviders(registry)[0];
 }
 
-/** 把 provider 的初始化状态整理成可展示的列表，供 /api/providers 之类的接口用。 */
-export function describeProviders(
-  registry: ExtensionRegistry,
-): Array<{ name: string; model: string; state: ExtensionEntry['state']; capabilities: string[] }> {
+/** 把 provider 的初始化状态整理成可展示的列表，供 /api/providers 接口用。 */
+export function describeProviders(registry: ExtensionRegistry): Array<{
+  name: string;
+  model: string;
+  state: ExtensionEntry['state'];
+  capabilities: string[];
+  hasCredentials: boolean;
+}> {
   return registry.list('provider').map((entry) => {
     const adapter = entry.extension as ProviderAdapter;
     const capabilities: string[] = [];
@@ -61,6 +65,7 @@ export function describeProviders(
       model: adapter.defaultModel,
       state: entry.state,
       capabilities,
+      hasCredentials: adapter.hasCredentials ?? false,
     };
   });
 }

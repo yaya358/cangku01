@@ -1,4 +1,6 @@
 import type { ApiErrorBody, ApiErrorCode } from '@tavern/shared';
+import { isProviderError } from '../core/provider/errors.js';
+import type { ProviderError } from '../core/provider/errors.js';
 
 /** 构造 AppError 的入参。 */
 export interface AppErrorOptions {
@@ -136,6 +138,47 @@ function statusToCode(status: number): ApiErrorCode {
 }
 
 /**
+ * 把 provider 层的错误翻译成 HTTP 语义。
+ *
+ * 分工：ProviderError 描述「上游出了什么事」，AppError 描述「该给调用方什么状态码」。
+ * 注意 AUTH_FAILED 对前端是 502 而不是 401 —— 401 表示「你没登录」，
+ * 而这里其实是「服务端自己的上游凭据有问题」，属于服务不可用。
+ */
+export function toAppErrorFromProvider(error: ProviderError): AppError {
+  switch (error.code) {
+    case 'RATE_LIMITED':
+      return AppError.rateLimited(error.message);
+    case 'TIMEOUT':
+      return AppError.timeout(error.message);
+    case 'BAD_REQUEST':
+      return AppError.validation(error.message, error.upstreamMessage);
+    case 'MODEL_NOT_FOUND':
+      return AppError.notFound(error.message);
+    case 'ABORTED':
+      return AppError.badRequest(error.message);
+    case 'NO_CREDENTIALS':
+    case 'AUTH_FAILED':
+      return new AppError({
+        code: 'UPSTREAM_ERROR',
+        statusCode: 502,
+        message: error.message,
+        cause: error,
+      });
+    case 'INVALID_RESPONSE':
+    case 'UPSTREAM_ERROR':
+    case 'NOT_IMPLEMENTED':
+    default:
+      return new AppError({
+        code: error.code === 'NOT_IMPLEMENTED' ? 'NOT_IMPLEMENTED' : 'UPSTREAM_ERROR',
+        statusCode: error.code === 'NOT_IMPLEMENTED' ? 501 : 502,
+        message: error.message,
+        details: error.upstreamMessage,
+        cause: error,
+      });
+  }
+}
+
+/**
  * 把任意抛出的东西收敛成 AppError。
  *
  * 关键点：未知异常一律转成不含细节的「服务内部错误」，
@@ -143,6 +186,7 @@ function statusToCode(status: number): ApiErrorCode {
  */
 export function toAppError(error: unknown): AppError {
   if (isAppError(error)) return error;
+  if (isProviderError(error)) return toAppErrorFromProvider(error);
 
   if (isValidationError(error)) {
     return AppError.validation('请求参数校验失败', (error as FastifyValidationLike).validation);
