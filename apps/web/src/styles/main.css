@@ -1,0 +1,113 @@
+/**
+ * 全局样式：只放「所有页面都用到」的东西。
+ * 组件内部的样式一律写在 SFC 的 <style scoped> 里，避免互相污染。
+ */
+
+:root {
+  /* 酒馆配色：深棕底色 + 琥珀色高光 */
+  --bg: #12100e;
+  --bg-soft: #171412;
+  --bg-elevated: #1d1916;
+  --border: #2c2620;
+  --border-strong: #3b332b;
+  --text: #ece4d8;
+  --text-dim: #9b8f7f;
+  --text-faint: #6d6357;
+  --accent: #e0a75e;
+  --accent-soft: rgba(224, 167, 94, 0.14);
+  --ok: #6cbf8b;
+  --warn: #e0b35e;
+  --err: #d9765f;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --font-sans:
+    'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1100px 520px at 12% -12%, rgba(224, 167, 94, 0.09), transparent 62%),
+    radial-gradient(900px 600px at 108% 0%, rgba(120, 96, 200, 0.09), transparent 58%), var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* 应用外壳：顶栏 + 内容 + 页脚 */
+.shell {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+.main {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 22px 56px;
+  flex: 1;
+}
+
+/* 细滚动条，避免在深色背景上刺眼 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #322b24;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

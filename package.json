@@ -10,8 +10,9 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel --filter @tavern/shared --filter @tavern/server run dev",
+    "dev": "pnpm -r --parallel --filter @tavern/shared --filter @tavern/server --filter @tavern/web run dev",
     "dev:server": "pnpm --filter @tavern/server run dev",
+    "dev:web": "pnpm --filter @tavern/web run dev",
     "build": "pnpm -r run build",
     "start": "pnpm --filter @tavern/server run start",
     "typecheck": "pnpm -r run typecheck",
