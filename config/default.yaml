@@ -21,6 +21,9 @@ server:
   bodyLimitMb: 2
   # 开发期反射任意来源；上线请改成明确的数组，例如 ["https://tavern.example.com"]
   corsOrigins: true
+  # 前端构建产物目录。null = 自动在仓库根找 apps/web/dist，
+  # 找到后由后端直接托管（pnpm build 之后只开 8787 也能看整站）。
+  staticDir: null
 
 logging:
   # fatal | error | warn | info | debug | trace | silent

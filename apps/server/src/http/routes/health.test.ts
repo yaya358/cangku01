@@ -1,5 +1,7 @@
 import { HealthPayloadSchema } from '@tavern/shared';
 import type { ApiEnvelope, HealthPayload } from '@tavern/shared';
+import os from 'node:os';
+import path from 'node:path';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../../app.js';
@@ -11,7 +13,11 @@ const silentLogger = pino({ level: 'silent' });
 
 /** 用 schema 默认值当测试基线，避免手写一份会过期的配置。 */
 function testConfig() {
-  return createDefaultConfig();
+  const config = createDefaultConfig();
+  // 固定指向一个不存在的目录：避免本机执行过 pnpm build 之后，
+  // 静态托管被自动打开而影响用例（这里只测 API）
+  config.server.staticDir = path.join(os.tmpdir(), 'tavern-test-no-dist');
+  return config;
 }
 
 function buildTestApp(extra: { extensions?: Parameters<typeof buildApp>[0]['extensions'] } = {}) {

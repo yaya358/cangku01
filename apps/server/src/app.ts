@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import { APP_VERSION } from '@tavern/shared';
 import Fastify, { LogController } from 'fastify';
 import type { FastifyError } from 'fastify';
@@ -10,6 +11,7 @@ import type { Extension } from './core/extension/index.js';
 import { toAppError } from './http/errors.js';
 import { failure } from './http/envelope.js';
 import { registerRoutes } from './http/routes/index.js';
+import { isFrontendNavigation, resolveStaticRoot, setStaticHeaders } from './http/static.js';
 import { createLogger, loggerConfigFromApp } from './lib/logger.js';
 import type { AppInstance } from './types/fastify.js';
 
@@ -48,6 +50,23 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     // 注意：顶层的 disableRequestLogging 在 fastify@6 会被移除，这里用新的 logController。
     logController: new LogController({ disableRequestLogging: true }),
   });
+
+  /**
+   * 静态托管：存在 apps/web/dist 就顺带把前端一起伺服。
+   *
+   * 开发期用 5173（有 HMR），这里服务的是「生产形态」——
+   * pnpm build 之后单个 8787 端口就能打开完整页面。
+   */
+  const staticHosting = resolveStaticRoot(config.server.staticDir);
+  if (staticHosting) {
+    await app.register(fastifyStatic, {
+      root: staticHosting.root,
+      prefix: '/',
+      index: [staticHosting.indexFile],
+      setHeaders: (response, filePath) => setStaticHeaders(response, filePath),
+    });
+  }
+  app.decorate('webDist', staticHosting?.root ?? null);
 
   // 依赖通过装饰器挂载，路由与钩子直接 app.config / app.extensions 取用
   app.decorate('config', config);
@@ -108,8 +127,14 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
   });
 
   app.setNotFoundHandler((request, reply) => {
+    // SPA 回落：/chat、/settings 这类前端路由交给 index.html，由 Vue Router 接手。
+    // 注意 /api/* 不在此列，接口写错就该老老实实返回 JSON 404。
+    if (staticHosting && isFrontendNavigation(request.method, request.url)) {
+      return reply.code(200).sendFile(staticHosting.indexFile);
+    }
+
     request.log.warn({ method: request.method, url: request.url }, '接口不存在');
-    void reply.status(404).send(
+    return reply.status(404).send(
       failure(request.id, {
         code: 'NOT_FOUND',
         message: `接口不存在: ${request.method} ${request.url}`,

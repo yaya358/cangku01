@@ -45,6 +45,11 @@ export const ServerConfigSchema = z.strictObject({
   bodyLimitMb: z.number().positive().max(64).default(2),
   /** true = 反射任意 Origin（开发方便）；数组 = 明确白名单（生产必须用这个） */
   corsOrigins: z.union([z.literal(true), z.array(z.string().min(1))]).default(true),
+  /**
+   * 前端构建产物目录（Vite 的 dist）。
+   * 留 null 表示自动从仓库根找 apps/web/dist；找不到就不托管静态资源。
+   */
+  staticDir: z.string().min(1).nullable().default(null),
 });
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 

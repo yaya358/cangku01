@@ -35,5 +35,7 @@ declare module 'fastify' {
     configSources: readonly string[];
     /** 实际生效的环境变量名（覆盖了 yaml 的那些） */
     configOverrides: readonly string[];
+    /** 前端静态产物目录；null 表示没开启静态托管 */
+    webDist: string | null;
   }
 }

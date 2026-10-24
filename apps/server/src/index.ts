@@ -101,6 +101,7 @@ async function main(): Promise<void> {
       health: `${address}/api/health`,
       env: config.app.env,
       storage: `${config.storage.driver} → ${config.storage.path}`,
+      webDist: app.webDist ?? '未找到前端产物（开发期请用 5173，或先执行 pnpm build）',
       node: process.version,
     },
     `酒馆 AI 后端已就绪 → ${address}`,
