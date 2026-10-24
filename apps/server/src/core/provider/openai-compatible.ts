@@ -1,5 +1,6 @@
 import { ProviderError, toProviderError } from './errors.js';
 import { providerMeta } from './helpers.js';
+import { parseSseStream, readStreamBody } from './sse.js';
 import type {
   ChatCallOptions,
   ChatMessage,
@@ -46,11 +47,23 @@ export interface OpenAiCompatibleOptions {
 /** 默认超时：非流式一次对话 2 分钟，流式整体 5 分钟。 */
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_STREAM_TIMEOUT_MS = 300_000;
+/** 首字超时：30 秒内一个字都没吐出来就判定上游卡死。 */
+const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 30_000;
 
 interface OpenAiChatCompletion {
   model?: string;
   choices?: Array<{
     message?: { role?: string; content?: string | null };
+    finish_reason?: string | null;
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+}
+
+/** 流式 chunk：比非流式少了 message、多了 delta。 */
+interface OpenAiStreamChunk {
+  model?: string;
+  choices?: Array<{
+    delta?: { role?: string; content?: string | null };
     finish_reason?: string | null;
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
@@ -277,21 +290,99 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
       };
     },
 
-    async *stream(_request, _callOptions): AsyncGenerator<ChatStreamEvent> {
-      // 流式实现在下一个提交里补上；这里先显式报「未实现」，
-      // 而不是静默返回空流让人以为上游没吐字。
-      yield {
-        type: 'error',
-        error: { code: 'NOT_IMPLEMENTED', message: '流式输出尚未实现', retryable: false },
-      };
+    async *stream(request, callOptions): AsyncGenerator<ChatStreamEvent> {
+      if (!options.apiKey) {
+        yield { type: 'error', error: ProviderError.noCredentials(name).toStreamError() };
+        return;
+      }
+
+      const requestedModel = request.model || defaultModel;
+      const timeoutMs = callOptions?.timeoutMs ?? DEFAULT_STREAM_TIMEOUT_MS;
+      const firstTokenTimeoutMs =
+        callOptions?.firstTokenTimeoutMs ?? DEFAULT_FIRST_TOKEN_TIMEOUT_MS;
+      const { signal } = combineSignals(callOptions, timeoutMs);
+
+      // 首字超时单独计时：整体超时可能给到 5 分钟，但 30 秒还没第一个字基本就是卡死
+      const firstTokenController = new AbortController();
+      const firstTokenTimer = setTimeout(
+        () => firstTokenController.abort(new Error('first-token-timeout')),
+        firstTokenTimeoutMs,
+      );
+      firstTokenTimer.unref?.();
+
+      const startedAt = performance.now();
+      let usage: TokenUsage | undefined;
+      let finishReason: string | null = null;
+      let firstTokenMs: number | null = null;
+
+      try {
+        const response = await postChat(
+          buildPayload(request, true),
+          AbortSignal.any([signal, firstTokenController.signal]),
+          requestedModel,
+        );
+
+        yield { type: 'start', model: requestedModel, at: Date.now() };
+
+        for await (const event of parseSseStream(readStreamBody(response.body))) {
+          const data = event.data.trim();
+          if (data.length === 0) continue;
+          if (data === '[DONE]') break;
+
+          let chunk: OpenAiStreamChunk;
+          try {
+            chunk = JSON.parse(data) as OpenAiStreamChunk;
+          } catch {
+            // 有些兼容实现会在流里插非 JSON 的心跳帧，跳过而不是让整个流失败
+            continue;
+          }
+
+          // 流式里不追踪上游回报的模型名：start 事件已经告诉调用方请求的是哪个模型，
+          // 中途被映射成快照版本对上层没有决策价值，反而多一个要维护的字段。
+          const choice = chunk.choices?.[0];
+          const delta = choice?.delta?.content;
+          if (typeof delta === 'string' && delta.length > 0) {
+            if (firstTokenMs === null) {
+              firstTokenMs = Math.round(performance.now() - startedAt);
+              clearTimeout(firstTokenTimer);
+            }
+            yield { type: 'delta', text: delta };
+          }
+
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
+
+          if (chunk.usage) {
+            usage = mapUsage(chunk.usage);
+            if (usage) yield { type: 'usage', usage };
+          }
+        }
+
+        yield {
+          type: 'done',
+          finishReason,
+          usage,
+          durationMs: Math.round(performance.now() - startedAt),
+          firstTokenMs,
+        };
+      } catch (error) {
+        // 约定：出错也走 error 事件而不 throw，上层只需处理事件流一条路径
+        const isFirstTokenTimeout = firstTokenController.signal.aborted;
+        const providerError = isFirstTokenTimeout
+          ? ProviderError.timeout(name, firstTokenTimeoutMs)
+          : toProviderError(error, name, timeoutMs);
+        yield { type: 'error', error: providerError.toStreamError() };
+      } finally {
+        clearTimeout(firstTokenTimer);
+      }
     },
   };
 
   return adapter;
 }
 
-/** 供流式实现复用，避免两个文件各写一套默认值。 */
+/** 供流式/非流式共用，避免两处各写一套默认值。 */
 export const OPENAI_COMPATIBLE_DEFAULTS = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   streamTimeoutMs: DEFAULT_STREAM_TIMEOUT_MS,
+  firstTokenTimeoutMs: DEFAULT_FIRST_TOKEN_TIMEOUT_MS,
 } as const;

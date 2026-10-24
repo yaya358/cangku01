@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ProviderError } from './errors.js';
 import { createOpenAiCompatibleProvider } from './openai-compatible.js';
-import type { ChatRequest } from './types.js';
+import type { ChatRequest, ChatStreamEvent } from './types.js';
 
 interface CapturedCall {
   path: string;
@@ -251,4 +251,175 @@ describe('OpenAI 兼容适配器 · 非流式', () => {
 
     await expect(promise).rejects.toMatchObject({ code: 'ABORTED' });
   }, 10_000);
+});
+
+/** 开一个 SSE 响应头。 */
+function sseHead(res: http.ServerResponse): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  });
+}
+
+/** 写一个 SSE 数据帧。 */
+function sseData(res: http.ServerResponse, payload: unknown): void {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+async function collectEvents(iterable: AsyncIterable<ChatStreamEvent>): Promise<ChatStreamEvent[]> {
+  const events: ChatStreamEvent[] = [];
+  for await (const event of iterable) events.push(event);
+  return events;
+}
+
+/** 把 delta 事件拼成完整文本，便于断言。 */
+function joinDeltas(events: ChatStreamEvent[]): string {
+  return events
+    .filter((event): event is Extract<ChatStreamEvent, { type: 'delta' }> => event.type === 'delta')
+    .map((event) => event.text)
+    .join('');
+}
+
+describe('OpenAI 兼容适配器 · 流式', () => {
+  it('按 chunk 吐出 delta，并以 done 收尾（含首字延迟与用量）', async () => {
+    const { provider, upstream } = await setup((_call, res) => {
+      sseHead(res);
+      sseData(res, { model: 'test-model-0613', choices: [{ delta: { role: 'assistant' } }] });
+      sseData(res, { choices: [{ delta: { content: '好' } }] });
+      sseData(res, { choices: [{ delta: { content: '嘞，' } }] });
+      sseData(res, { choices: [{ delta: { content: '马上来' } }] });
+      sseData(res, {
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 },
+      });
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+
+    const events = await collectEvents(provider.stream(basicRequest));
+
+    expect(events[0]).toMatchObject({ type: 'start', model: 'test-model' });
+    expect(joinDeltas(events)).toBe('好嘞，马上来');
+
+    const usageEvent = events.find((event) => event.type === 'usage');
+    expect(usageEvent).toMatchObject({
+      type: 'usage',
+      usage: { promptTokens: 20, completionTokens: 5, totalTokens: 25 },
+    });
+
+    const done = events.at(-1);
+    expect(done).toMatchObject({ type: 'done', finishReason: 'stop' });
+    if (done?.type === 'done') {
+      expect(done.firstTokenMs).not.toBeNull();
+      expect(done.durationMs).toBeGreaterThanOrEqual(0);
+      expect(done.usage?.totalTokens).toBe(25);
+    }
+
+    // 流式请求必须带 stream:true 与 stream_options
+    const body = upstream.calls[0]?.body;
+    expect(body?.stream).toBe(true);
+    expect(body?.stream_options).toEqual({ include_usage: true });
+    expect(upstream.calls[0]?.headers.accept).toBe('text/event-stream');
+  });
+
+  it('忽略流里的非 JSON 心跳帧', async () => {
+    const { provider } = await setup((_call, res) => {
+      sseHead(res);
+      res.write('data: not-json\n\n');
+      sseData(res, { choices: [{ delta: { content: 'A' } }] });
+      res.write(': ping\n\n');
+      sseData(res, { choices: [{ delta: { content: 'B' } }] });
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+
+    const events = await collectEvents(provider.stream(basicRequest));
+    expect(joinDeltas(events)).toBe('AB');
+    expect(events.at(-1)?.type).toBe('done');
+  });
+
+  it('关闭 include_usage 时不再发 stream_options', async () => {
+    const upstream = await startUpstream((_call, res) => {
+      sseHead(res);
+      sseData(res, { choices: [{ delta: { content: 'x' } }] });
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    upstreams.push(upstream);
+
+    const provider = createOpenAiCompatibleProvider({
+      name: 'test-upstream',
+      baseUrl: upstream.url,
+      apiKey: 'sk-test',
+      defaultModel: 'test-model',
+      requestStreamUsage: false,
+    });
+
+    await collectEvents(provider.stream(basicRequest));
+    expect(upstream.calls[0]?.body.stream_options).toBeUndefined();
+  });
+
+  it('上游 5xx 以 error 事件收尾而不是抛异常', async () => {
+    const { provider } = await setup((_call, res) => {
+      jsonResponse(res, 503, { error: { message: 'overloaded' } });
+    });
+
+    const events = await collectEvents(provider.stream(basicRequest));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'error',
+      error: { code: 'UPSTREAM_ERROR', retryable: true },
+    });
+  });
+
+  it('没有 Key 时立刻返回 error 事件', async () => {
+    const { provider, upstream } = await setup((_call, res) => jsonResponse(res, 200, {}), {
+      apiKey: undefined,
+    });
+
+    const events = await collectEvents(provider.stream(basicRequest));
+    expect(events[0]).toMatchObject({ type: 'error', error: { code: 'NO_CREDENTIALS' } });
+    expect(upstream.calls).toHaveLength(0);
+  });
+
+  it('首字超时判定为 TIMEOUT', async () => {
+    const { provider } = await setup(() => {
+      // 收到请求但一直不吐字，模拟上游卡死
+    });
+
+    const events = await collectEvents(
+      provider.stream(basicRequest, { firstTokenTimeoutMs: 80, timeoutMs: 3000 }),
+    );
+
+    expect(events.at(-1)).toMatchObject({ type: 'error', error: { code: 'TIMEOUT' } });
+  });
+
+  it('外部取消判定为 ABORTED', async () => {
+    const { provider } = await setup(() => {
+      // 同样不吐字，但这次由外部信号取消
+    });
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 60);
+
+    const events = await collectEvents(
+      provider.stream(basicRequest, { signal: controller.signal, timeoutMs: 3000 }),
+    );
+
+    expect(events.at(-1)).toMatchObject({ type: 'error', error: { code: 'ABORTED' } });
+  });
+
+  it('中文被拆成多次 delta 时拼接结果仍然正确', async () => {
+    const { provider } = await setup((_call, res) => {
+      sseHead(res);
+      sseData(res, { choices: [{ delta: { content: '你好' } }] });
+      sseData(res, { choices: [{ delta: { content: '世界' } }] });
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+
+    const events = await collectEvents(provider.stream(basicRequest));
+    expect(joinDeltas(events)).toBe('你好世界');
+  });
 });
