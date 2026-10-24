@@ -16,6 +16,13 @@ export interface HealthDeps {
   configSources: readonly string[];
   /** 实际生效的环境变量名 */
   configOverrides: readonly string[];
+  /** 数据库状态快照 */
+  storage: {
+    driver: string;
+    path: string;
+    open: boolean;
+    characters: number;
+  };
 }
 
 /** 一项自检的定义。返回值允许是 Promise，方便后续接存储探活。 */
@@ -24,7 +31,7 @@ interface CheckDefinition {
   run: (deps: HealthDeps) => HealthCheck | Promise<HealthCheck>;
 }
 
-/** 自检清单。接数据库时再加 storage（带一次真实 ping）。 */
+/** 自检清单。 */
 const DEFINITIONS: readonly CheckDefinition[] = [
   {
     name: 'config',
@@ -36,6 +43,16 @@ const DEFINITIONS: readonly CheckDefinition[] = [
       parts.push(config.app.env);
       return { name: 'config', status: 'ok', message: parts.join(' · ') };
     },
+  },
+  {
+    name: 'storage',
+    run: ({ storage }) => ({
+      name: 'storage',
+      status: storage.open ? 'ok' : 'failed',
+      message: storage.open
+        ? `${storage.driver} · ${storage.characters} 个角色`
+        : `数据库未打开（${storage.path}）`,
+    }),
   },
   {
     name: 'memory',
@@ -114,15 +131,31 @@ export async function buildHealthPayload(deps: HealthDeps): Promise<HealthPayloa
  * 拿到 degraded 就把具体是哪一项不健康显示出来。
  */
 export function registerHealthRoutes(app: AppInstance): void {
-  app.get(HEALTH_ENDPOINT, async (request) =>
-    success(
+  app.get(HEALTH_ENDPOINT, async (request) => {
+    // 角色数量只在数据库打开后才有意义；计数失败不影响整体自检
+    let characters = 0;
+    if (app.storage.isOpen) {
+      try {
+        characters = app.characters().count();
+      } catch {
+        characters = 0;
+      }
+    }
+
+    return success(
       request.id,
       await buildHealthPayload({
         config: app.config,
         configSources: app.configSources,
         configOverrides: app.configOverrides,
         extensions: app.extensions.summary(),
+        storage: {
+          driver: app.config.storage.driver,
+          path: app.storage.path,
+          open: app.storage.isOpen,
+          characters,
+        },
       }),
-    ),
-  );
+    );
+  });
 }

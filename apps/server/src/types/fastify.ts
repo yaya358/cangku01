@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FastifyInstance, FastifyTypeProviderDefault, RawServerDefault } from 'fastify';
 import type { AppConfig } from '../config/schema.js';
+import type { CharacterRepository } from '../core/character/repository.js';
 import type { ExtensionRegistry } from '../core/extension/index.js';
+import type { SqliteStorage } from '../core/storage/index.js';
 import type { AppLogger } from '../lib/logger.js';
 
 /**
@@ -37,5 +39,9 @@ declare module 'fastify' {
     configOverrides: readonly string[];
     /** 前端静态产物目录；null 表示没开启静态托管 */
     webDist: string | null;
+    /** 数据库存储扩展（打开 / 关闭跟随应用生命周期） */
+    storage: SqliteStorage;
+    /** 角色仓储；内部按需创建，数据库没就绪时调用会抛错 */
+    characters: () => CharacterRepository;
   }
 }

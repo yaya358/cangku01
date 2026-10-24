@@ -1,23 +1,17 @@
 import { HealthPayloadSchema } from '@tavern/shared';
 import type { ApiEnvelope, HealthPayload } from '@tavern/shared';
-import os from 'node:os';
-import path from 'node:path';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../../app.js';
-import { createDefaultConfig } from '../../config/index.js';
 import { defineExtension } from '../../core/extension/index.js';
+import { createTestConfig } from '../../testing/test-config.js';
 
 /** 测试不占用真实端口：app.inject() 直接走内存里的请求管线。 */
 const silentLogger = pino({ level: 'silent' });
 
-/** 用 schema 默认值当测试基线，避免手写一份会过期的配置。 */
+/** 测试基线配置（内存库 + 关闭静态托管）。 */
 function testConfig() {
-  const config = createDefaultConfig();
-  // 固定指向一个不存在的目录：避免本机执行过 pnpm build 之后，
-  // 静态托管被自动打开而影响用例（这里只测 API）
-  config.server.staticDir = path.join(os.tmpdir(), 'tavern-test-no-dist');
-  return config;
+  return createTestConfig();
 }
 
 function buildTestApp(extra: { extensions?: Parameters<typeof buildApp>[0]['extensions'] } = {}) {
@@ -48,7 +42,26 @@ describe('GET /api/health', () => {
       expect(payload.server.port).toBe(8787);
       expect(payload.checks.length).toBeGreaterThan(0);
       expect(payload.checks.every((item) => item.status === 'ok')).toBe(true);
-      expect(payload.extensions.total).toBe(0);
+      // 内置扩展里至少包含 storage.sqlite
+      expect(payload.extensions.failed).toBe(0);
+      expect(payload.extensions.ready).toBeGreaterThanOrEqual(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('storage 检查项能报出数据库状态与角色数', async () => {
+    const app = await buildTestApp();
+
+    try {
+      const response = await app.inject({ method: 'GET', url: '/api/health' });
+      const body = response.json() as ApiEnvelope<HealthPayload>;
+      if (!body.ok) throw new Error('健康检查不应失败');
+
+      const storageCheck = body.data.checks.find((item) => item.name === 'storage');
+      expect(storageCheck?.status).toBe('ok');
+      expect(storageCheck?.message).toContain('sqlite');
+      expect(storageCheck?.message).toContain('0 个角色');
     } finally {
       await app.close();
     }
@@ -90,7 +103,9 @@ describe('GET /api/health', () => {
 
       const payload = HealthPayloadSchema.parse(body.data);
       expect(payload.status).toBe('degraded');
-      expect(payload.extensions).toEqual({ total: 1, ready: 0, failed: 1, pending: 0 });
+      // storage 正常 + 这个坏掉的 provider 失败
+      expect(payload.extensions.failed).toBe(1);
+      expect(payload.extensions.ready).toBeGreaterThanOrEqual(1);
 
       const extensionCheck = payload.checks.find((item) => item.name === 'extensions');
       expect(extensionCheck?.status).toBe('degraded');

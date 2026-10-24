@@ -5,7 +5,7 @@ import { HealthPayloadSchema } from '@tavern/shared';
 import { pino } from 'pino';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
-import { createDefaultConfig } from '../config/index.js';
+import { createTestConfig } from '../testing/test-config.js';
 import { isFrontendNavigation, resolveStaticRoot, setStaticHeaders } from './static.js';
 import type { HeaderSink } from './static.js';
 
@@ -90,7 +90,7 @@ describe('SPA 回落与缓存策略', () => {
 describe('静态托管（集成）', () => {
   it('GET / 返回 index.html，前端路由回落到同一入口', async () => {
     const root = makeFakeDist();
-    const config = createDefaultConfig();
+    const config = createTestConfig();
     config.server.staticDir = root;
     const app = await buildApp({ config, logger: silentLogger });
 
@@ -115,7 +115,7 @@ describe('静态托管（集成）', () => {
   });
 
   it('/api 下未命中仍然是 JSON 404，不会回落到 index.html', async () => {
-    const config = createDefaultConfig();
+    const config = createTestConfig();
     config.server.staticDir = makeFakeDist();
     const app = await buildApp({ config, logger: silentLogger });
 
@@ -133,7 +133,7 @@ describe('静态托管（集成）', () => {
   });
 
   it('没有 dist 时 / 返回 JSON 404（纯 API 模式）', async () => {
-    const config = createDefaultConfig();
+    const config = createTestConfig();
     config.server.staticDir = makeEmptyDir();
     const app = await buildApp({ config, logger: silentLogger });
 

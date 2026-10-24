@@ -3,17 +3,14 @@ import type { ChatStreamPayload } from '@tavern/shared';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../../app.js';
-import { createDefaultConfig } from '../../config/index.js';
 import type { ChatStreamEvent } from '../../core/provider/index.js';
 import { defineProvider } from '../../testing/provider-fixture.js';
+import { createTestConfig } from '../../testing/test-config.js';
 
 const silentLogger = pino({ level: 'silent' });
 
 function testConfig() {
-  const config = createDefaultConfig();
-  config.server.staticDir = null;
-  config.providers = [];
-  return config;
+  return createTestConfig();
 }
 
 /** 假 provider：可控地吐出固定流。 */

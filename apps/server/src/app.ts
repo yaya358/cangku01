@@ -6,10 +6,13 @@ import Fastify, { LogController } from 'fastify';
 import type { FastifyError } from 'fastify';
 import type { Logger } from 'pino';
 import type { AppConfig } from './config/schema.js';
+import { createCharacterRepository } from './core/character/repository.js';
+import type { CharacterRepository } from './core/character/repository.js';
 import { ExtensionRegistry } from './core/extension/index.js';
 import type { Extension } from './core/extension/index.js';
 import { createProvidersFromConfig } from './core/provider/index.js';
-import { toAppError } from './http/errors.js';
+import { createSqliteStorage, resolveStoragePath } from './core/storage/index.js';
+import { AppError, toAppError } from './http/errors.js';
 import { failure } from './http/envelope.js';
 import { registerRoutes } from './http/routes/index.js';
 import { isFrontendNavigation, resolveStaticRoot, setStaticHeaders } from './http/static.js';
@@ -91,13 +94,37 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     maxSetupPasses: config.extensions.maxSetupPasses,
   });
 
+  /**
+   * 数据库存储扩展。
+   *
+   * 只支持 sqlite：配置里留了 json 选项，但没实现就别假装能用，
+   * 启动时直接报清楚，好过跑起来才发现数据写丢。
+   */
+  if (config.storage.driver !== 'sqlite') {
+    throw AppError.notImplemented(
+      `storage.driver 目前只实现了 sqlite，收到的是 "${config.storage.driver}"`,
+    );
+  }
+
+  const storage = createSqliteStorage({
+    path: resolveStoragePath(config.storage.path, options.configSources ?? []),
+    logger,
+  });
+  app.decorate('storage', storage);
+
+  // 仓储层延迟创建：它依赖已打开的连接，而连接是在 onReady 阶段才建立的
+  let characterRepo: CharacterRepository | null = null;
+  app.decorate('characters', (): CharacterRepository => {
+    if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
+    characterRepo ??= createCharacterRepository(storage.db);
+    return characterRepo;
+  });
+
   // 配置里声明的模型服务按顺序注册成 provider 扩展；
   // 之后再注册调用方传进来的扩展（测试、上层模块）。
   const providers = createProvidersFromConfig(config.providers);
-  const declaredExtensions = [...providers, ...(options.extensions ?? [])];
-  if (declaredExtensions.length > 0) {
-    extensions.register(...declaredExtensions);
-  }
+  const declaredExtensions: Extension[] = [storage, ...providers, ...(options.extensions ?? [])];
+  extensions.register(...declaredExtensions);
   app.decorate('extensions', extensions);
 
   await app.register(cors, {
