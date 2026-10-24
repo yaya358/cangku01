@@ -99,6 +99,12 @@ export type ChatStreamPayload =
       firstTokenMs: number | null;
       usage?: ChatUsage;
     }
+  | {
+      /** 会话模式下，一轮结束后落库的消息 id */
+      type: 'saved';
+      userMessageId: string;
+      assistantMessageId: string;
+    }
   | { type: 'error'; code: string; message: string; retryable: boolean };
 
 /** 非流式接口的返回体。 */

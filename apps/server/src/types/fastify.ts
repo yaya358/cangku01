@@ -3,6 +3,8 @@ import type { FastifyInstance, FastifyTypeProviderDefault, RawServerDefault } fr
 import type { AppConfig } from '../config/schema.js';
 import type { AvatarStore } from '../core/character/avatars.js';
 import type { CharacterRepository } from '../core/character/repository.js';
+import type { ConversationRepository } from '../core/chat/conversation-repository.js';
+import type { MessageRepository } from '../core/chat/message-repository.js';
 import type { ExtensionRegistry } from '../core/extension/index.js';
 import type { SqliteStorage } from '../core/storage/index.js';
 import type { WorldbookRepository } from '../core/worldbook/repository.js';
@@ -49,5 +51,9 @@ declare module 'fastify' {
     avatars: AvatarStore;
     /** 世界书仓储；同样按需创建 */
     worldbook: () => WorldbookRepository;
+    /** 会话仓储 */
+    conversations: () => ConversationRepository;
+    /** 消息仓储 */
+    messages: () => MessageRepository;
   }
 }

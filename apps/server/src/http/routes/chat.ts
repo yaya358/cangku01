@@ -1,21 +1,16 @@
-import type {
-  ChatMessage,
-  ChatRequestBody,
-  ChatResultPayload,
-  ChatStreamPayload,
-  ProviderInfo,
-} from '@tavern/shared';
+import type { ChatStreamPayload, ProviderInfo } from '@tavern/shared';
 import {
   CHAT_ENDPOINT,
   CHAT_STREAM_ENDPOINT,
   ChatRequestBodySchema,
   PROVIDERS_ENDPOINT,
 } from '@tavern/shared';
+import type { ChatResultPayload } from '@tavern/shared';
 import type { ServerResponse } from 'node:http';
-import { prepareConversationContext } from '../../core/context/index.js';
-import { describeProviders, firstProvider, listProviders } from '../../core/provider/index.js';
-import type { ChatStreamEvent, ProviderAdapter } from '../../core/provider/index.js';
+import { describeProviders } from '../../core/provider/index.js';
+import type { ChatStreamEvent } from '../../core/provider/index.js';
 import type { AppInstance } from '../../types/fastify.js';
+import { resolveMessages, resolveProvider } from '../chat-support.js';
 import { success } from '../envelope.js';
 import { AppError, toAppError } from '../errors.js';
 
@@ -41,32 +36,6 @@ function parseBody(raw: unknown) {
     );
   }
   return parsed.data;
-}
-
-/** 选 provider：指定名字就精确取，否则用注册表里优先级最高的。 */
-function resolveProvider(app: AppInstance, name?: string): ProviderAdapter {
-  if (name) {
-    const found = app.extensions.get<ProviderAdapter>(name);
-    if (!found || found.meta.kind !== 'provider') {
-      const available = listProviders(app.extensions)
-        .map((item) => item.meta.name)
-        .join(', ');
-      throw AppError.notFound(
-        available.length > 0
-          ? `provider 不存在: "${name}"，当前可用: ${available}`
-          : `provider 不存在: "${name}"，尚未配置任何模型服务`,
-      );
-    }
-    return found;
-  }
-
-  const fallback = firstProvider(app.extensions);
-  if (!fallback) {
-    throw AppError.notImplemented(
-      '尚未配置模型服务：请在 config/user.yaml 的 providers 段里加一个，然后重启后端',
-    );
-  }
-  return fallback;
 }
 
 /**
@@ -97,46 +66,6 @@ function writeEvent(raw: ServerResponse, payload: ChatStreamPayload): void {
   } catch {
     // 连接已断，后续循环会因 abort 自然结束
   }
-}
-
-/** 解析后的消息，以及「这轮是怎么来的」元信息。 */
-interface ResolvedMessages {
-  messages: ChatMessage[];
-  /** 走上下文引擎时才有 */
-  character?: { id: string; name: string };
-  contextTokens?: number;
-  worldbookHits?: number;
-}
-
-/**
- * 决定这一轮到底发给模型什么。
- *
- * 两条路径：
- *   - 传了 characterId → 走上下文引擎：角色人设 + 世界书（按关键词触发）+ 预算裁剪
- *   - 没传          → 裸对话：messages 原样发出去（试话页调试用）
- */
-function resolveMessages(app: AppInstance, body: ChatRequestBody): ResolvedMessages {
-  if (!body.characterId) {
-    return { messages: [...body.messages] };
-  }
-
-  const character = app.characters().getById(body.characterId);
-  if (!character) throw AppError.notFound(`角色不存在: ${body.characterId}`);
-
-  const prepared = prepareConversationContext({
-    character,
-    entries: app.worldbook().listForCharacter(character.id),
-    messages: body.messages,
-    userName: body.userName,
-    budget: body.budget,
-  });
-
-  return {
-    messages: prepared.messages,
-    character: { id: character.id, name: character.name },
-    contextTokens: prepared.budget.used,
-    worldbookHits: prepared.worldbook.hits.length,
-  };
 }
 
 export function registerChatRoutes(app: AppInstance): void {

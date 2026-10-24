@@ -13,6 +13,10 @@ import {
 } from './core/character/avatars.js';
 import { createCharacterRepository } from './core/character/repository.js';
 import type { CharacterRepository } from './core/character/repository.js';
+import { createConversationRepository } from './core/chat/conversation-repository.js';
+import type { ConversationRepository } from './core/chat/conversation-repository.js';
+import { createMessageRepository } from './core/chat/message-repository.js';
+import type { MessageRepository } from './core/chat/message-repository.js';
 import { ExtensionRegistry } from './core/extension/index.js';
 import type { Extension } from './core/extension/index.js';
 import { createProvidersFromConfig } from './core/provider/index.js';
@@ -147,6 +151,20 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
     worldbookRepo ??= createWorldbookRepository(storage.db);
     return worldbookRepo;
+  });
+
+  let conversationRepo: ConversationRepository | null = null;
+  app.decorate('conversations', (): ConversationRepository => {
+    if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
+    conversationRepo ??= createConversationRepository(storage.db);
+    return conversationRepo;
+  });
+
+  let messageRepo: MessageRepository | null = null;
+  app.decorate('messages', (): MessageRepository => {
+    if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
+    messageRepo ??= createMessageRepository(storage.db);
+    return messageRepo;
   });
 
   // 配置里声明的模型服务按顺序注册成 provider 扩展；

@@ -53,3 +53,39 @@ export function characterExportJsonEndpoint(id: string): string {
 
 /** 上下文预览（不调模型，只返回组装结果）。 */
 export const CONTEXT_PREVIEW_ENDPOINT = `${API_PREFIX}/context/preview`;
+
+/** 会话集合。 */
+export const CONVERSATIONS_ENDPOINT = `${API_PREFIX}/conversations`;
+
+/** 单个会话。 */
+export function conversationEndpoint(id: string): string {
+  return `${CONVERSATIONS_ENDPOINT}/${encodeURIComponent(id)}`;
+}
+
+/** 会话里的消息集合（追加一条）。 */
+export function conversationMessagesEndpoint(id: string): string {
+  return `${conversationEndpoint(id)}/messages`;
+}
+
+/** 会话里发一句话并流式生成（SSE）。 */
+export function conversationStreamEndpoint(id: string): string {
+  return `${conversationEndpoint(id)}/stream`;
+}
+
+/** 消息集合（用于编辑 / 删除单条）。 */
+export const MESSAGES_ENDPOINT = `${API_PREFIX}/messages`;
+
+/** 单条消息。 */
+export function messageEndpoint(id: string): string {
+  return `${MESSAGES_ENDPOINT}/${encodeURIComponent(id)}`;
+}
+
+/** 追加一个候选回复（重说）。 */
+export function messageSwipeEndpoint(id: string): string {
+  return `${messageEndpoint(id)}/swipe`;
+}
+
+/** 切换候选回复。 */
+export function messageSwipeSelectEndpoint(id: string): string {
+  return `${messageEndpoint(id)}/swipe/select`;
+}
