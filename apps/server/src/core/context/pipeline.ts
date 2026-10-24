@@ -1,0 +1,355 @@
+import type { ChatMessage } from '@tavern/shared';
+import { estimateTokens } from './tokens.js';
+import { DEFAULT_BUDGET, DEFAULT_SYSTEM_PROMPT } from './types.js';
+import type { AssembledContext, AssembleInput, ContextBudget, ContextLayer } from './types.js';
+
+/**
+ * 上下文组装管线。
+ *
+ * 顺序即「模型看到的顺序」：
+ *   系统提示 → 角色人设 → 场景 → 世界书 → 前情摘要 → 历史对话 → 历史后指令 → 本轮输入
+ *
+ * 裁剪只看 priority，不看顺序：同一个数组既决定拼装顺序又决定裁剪优先级，
+ * 用两个字段分开表达，避免「为了裁剪方便而打乱语义顺序」。
+ */
+
+/** 保留优先级（越大越不容易被裁）。 */
+const PRIORITY = {
+  userInput: 1000,
+  system: 950,
+  postHistory: 800,
+  persona: 700,
+  scenario: 650,
+  worldbook: 600,
+  summary: 500,
+  historyBase: 300,
+} as const;
+
+/** 低于这个优先级的层不尝试截断，直接丢弃（截半句历史没有意义）。 */
+const TRUNCATE_FLOOR = 600;
+
+/** 截断后至少要保留的 token 数，太小等于没保留。 */
+const MIN_TRUNCATED_TOKENS = 48;
+
+/** 把 {{char}} / {{user}} 替换成实际名字。写死在角色卡里的文本靠它生效。 */
+function substitute(text: string, charName: string, userName: string): string {
+  return text
+    .replaceAll('{{char}}', charName)
+    .replaceAll('{{user}}', userName)
+    .replaceAll('{{char_name}}', charName)
+    .replaceAll('{{user_name}}', userName);
+}
+
+/** 生成一层，同时算好 token。空内容返回 null，避免往 prompt 里塞空行。 */
+function makeLayer(layer: Omit<ContextLayer, 'tokens'>): ContextLayer | null {
+  const content = layer.content.trim();
+  if (content.length === 0) return null;
+  return { ...layer, content, tokens: estimateTokens(content) };
+}
+
+let historySeq = 0;
+
+/** 按 token 上限截断文本，尽量在句子边界断开。 */
+export function truncateToTokens(text: string, maxTokens: number): string {
+  if (maxTokens < MIN_TRUNCATED_TOKENS) return '';
+
+  // 先按比例估一个字符数，再逐步收敛（估算函数不是线性的，留一步校正）
+  const totalTokens = estimateTokens(text);
+  if (totalTokens <= maxTokens) return text;
+
+  let limitChars = Math.floor((text.length * maxTokens) / totalTokens);
+  let candidate = text.slice(0, limitChars);
+
+  for (let attempt = 0; attempt < 8 && estimateTokens(candidate) > maxTokens; attempt += 1) {
+    limitChars = Math.floor(limitChars * 0.85);
+    candidate = text.slice(0, limitChars);
+  }
+
+  // 优先在句末/换行处断开，读起来不突兀
+  const boundary = Math.max(
+    candidate.lastIndexOf('。'),
+    candidate.lastIndexOf('！'),
+    candidate.lastIndexOf('？'),
+    candidate.lastIndexOf('\n'),
+    candidate.lastIndexOf('.'),
+  );
+  if (boundary > candidate.length * 0.6) candidate = candidate.slice(0, boundary + 1);
+
+  return `${candidate.trimEnd()}…`;
+}
+
+/** 收集所有层（未裁剪），顺序即拼装顺序。 */
+function collectLayers(input: AssembleInput, charName: string, userName: string): ContextLayer[] {
+  const layers: (ContextLayer | null)[] = [];
+  const character = input.character;
+
+  // 1. 系统提示：角色自己写了就用角色的，否则用全局默认
+  const systemText = character.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+  layers.push(
+    makeLayer({
+      id: 'system',
+      kind: 'system',
+      title: '系统提示',
+      content: substitute(systemText, charName, userName),
+      priority: PRIORITY.system,
+      splittable: false,
+    }),
+  );
+
+  // 2. 角色人设：名字 + 描述 + 性格
+  const personaParts: string[] = [`【角色】${charName}`];
+  if (character.description.trim().length > 0) personaParts.push(character.description.trim());
+  if (character.personality.trim().length > 0) {
+    personaParts.push(`【性格】${character.personality.trim()}`);
+  }
+  layers.push(
+    makeLayer({
+      id: 'persona',
+      kind: 'persona',
+      title: '角色人设',
+      content: substitute(personaParts.join('\n'), charName, userName),
+      priority: PRIORITY.persona,
+      splittable: true,
+    }),
+  );
+
+  // 3. 场景
+  if (character.scenario.trim().length > 0) {
+    layers.push(
+      makeLayer({
+        id: 'scenario',
+        kind: 'scenario',
+        title: '场景',
+        content: `【场景】${substitute(character.scenario.trim(), charName, userName)}`,
+        priority: PRIORITY.scenario,
+        splittable: true,
+      }),
+    );
+  }
+
+  // 4. 世界书（阶段 4 后续提交接入；这里先支持传入）
+  for (const entry of input.worldbook ?? []) {
+    layers.push(
+      makeLayer({
+        id: `worldbook:${entry.id}`,
+        kind: 'worldbook',
+        title: `世界书 · ${entry.title}`,
+        content: substitute(entry.content, charName, userName),
+        priority: PRIORITY.worldbook,
+        splittable: true,
+        meta: { keywords: entry.keywords ?? [] },
+      }),
+    );
+  }
+
+  // 5. 前情摘要（长对话的压缩结果）
+  if (input.summary && input.summary.trim().length > 0) {
+    layers.push(
+      makeLayer({
+        id: 'summary',
+        kind: 'summary',
+        title: '前情提要',
+        content: `【前情提要】\n${substitute(input.summary.trim(), charName, userName)}`,
+        priority: PRIORITY.summary,
+        splittable: true,
+      }),
+    );
+  }
+
+  // 6. 历史对话：一条一层，越新优先级越高（裁剪时先丢最早的）
+  const history = input.history.filter((message) => message.content.trim().length > 0);
+  history.forEach((message, index) => {
+    const recency = index; // 0 = 最早
+    layers.push(
+      makeLayer({
+        id: `history:${historySeq++}`,
+        kind: 'history',
+        title: `${message.role === 'user' ? userName : charName}`,
+        content: substitute(message.content, charName, userName),
+        priority: PRIORITY.historyBase + recency,
+        splittable: false,
+        meta: { role: message.role, index, name: message.name },
+      }),
+    );
+  });
+
+  // 7. 历史后指令：放在历史之后，用来压制模型跑偏
+  if (character.postHistoryInstructions?.trim()) {
+    layers.push(
+      makeLayer({
+        id: 'post_history',
+        kind: 'post_history',
+        title: '历史后指令',
+        content: substitute(character.postHistoryInstructions.trim(), charName, userName),
+        priority: PRIORITY.postHistory,
+        splittable: false,
+      }),
+    );
+  }
+
+  // 8. 本轮输入：永远保留
+  layers.push(
+    makeLayer({
+      id: 'user_input',
+      kind: 'user_input',
+      title: '本轮输入',
+      content: substitute(input.userInput.trim(), charName, userName),
+      priority: PRIORITY.userInput,
+      splittable: false,
+    }),
+  );
+
+  return layers.filter((layer): layer is ContextLayer => layer !== null);
+}
+
+/**
+ * 按预算裁剪层。
+ *
+ * 策略：按优先级从高到低塞，塞不下时——
+ *   - 高优先级层（人设/世界书这类长文本）尝试截断后塞进去
+ *   - 低优先级层（历史）整层丢弃
+ * 这样「人设尽量完整、历史能丢就丢」，符合角色扮演的直觉。
+ */
+function applyBudget(
+  layers: readonly ContextLayer[],
+  budget: ContextBudget,
+): { kept: ContextLayer[]; dropped: ContextLayer[]; notes: string[] } {
+  const totalTokens = layers.reduce((sum, layer) => sum + layer.tokens, 0);
+  if (totalTokens <= budget.available) {
+    return { kept: [...layers], dropped: [], notes: [] };
+  }
+
+  const notes: string[] = [];
+  const dropped: ContextLayer[] = [];
+
+  // 依据优先级降序；同优先级保持原顺序（稳定排序）
+  const ordered = layers
+    .map((layer, index) => ({ layer, index }))
+    .sort((left, right) => right.layer.priority - left.layer.priority || left.index - right.index);
+
+  const accepted = new Map<string, ContextLayer>();
+  let remaining = budget.available;
+
+  for (const { layer } of ordered) {
+    if (layer.tokens <= remaining) {
+      accepted.set(layer.id, layer);
+      remaining -= layer.tokens;
+      continue;
+    }
+
+    // 塞不下：高价值的长文本尝试截断
+    if (layer.priority >= TRUNCATE_FLOOR && remaining >= MIN_TRUNCATED_TOKENS) {
+      const content = truncateToTokens(layer.content, remaining);
+      if (content.length > 0) {
+        accepted.set(`${layer.id}:truncated`, {
+          ...layer,
+          id: `${layer.id}:truncated`,
+          content,
+          tokens: estimateTokens(content),
+        });
+        notes.push(`${layer.title} 超出预算，已截断到约 ${remaining} token`);
+        remaining = 0;
+        continue;
+      }
+    }
+
+    dropped.push(layer);
+  }
+
+  // 恢复原始顺序（拼装顺序必须稳定）
+  const kept = layers
+    .flatMap((layer) => [accepted.get(layer.id), accepted.get(`${layer.id}:truncated`)])
+    .filter((layer): layer is ContextLayer => layer !== undefined);
+
+  // 被裁掉的层也按原始顺序返回：界面上「丢了哪些」要按对话顺序读得通
+  const orderOf = new Map(layers.map((layer, index) => [layer.id, index]));
+  dropped.sort((left, right) => (orderOf.get(left.id) ?? 0) - (orderOf.get(right.id) ?? 0));
+
+  const droppedHistory = dropped.filter((layer) => layer.kind === 'history').length;
+  if (droppedHistory > 0) {
+    notes.push(`上下文超预算，最早 ${droppedHistory} 条历史被裁掉`);
+  }
+
+  return { kept, dropped, notes };
+}
+
+/** 把层拼成真正要发出去的消息数组。 */
+function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
+  const systemParts = layers
+    .filter(
+      (layer) =>
+        layer.kind === 'system' ||
+        layer.kind === 'persona' ||
+        layer.kind === 'scenario' ||
+        layer.kind === 'worldbook' ||
+        layer.kind === 'summary',
+    )
+    .map((layer) => layer.content);
+
+  const messages: ChatMessage[] = [];
+  if (systemParts.length > 0) {
+    messages.push({ role: 'system', content: systemParts.join('\n\n') });
+  }
+
+  for (const layer of layers) {
+    if (layer.kind !== 'history') continue;
+    messages.push({
+      role: (layer.meta?.role as ChatMessage['role'] | undefined) ?? 'user',
+      content: layer.content,
+      ...(layer.meta?.name ? { name: String(layer.meta.name) } : {}),
+    });
+  }
+
+  for (const layer of layers) {
+    if (layer.kind !== 'post_history') continue;
+    // 历史之后插一条 system：与 OpenAI 兼容层普遍支持，也能被模型明确读到
+    messages.push({ role: 'system', content: layer.content });
+  }
+
+  for (const layer of layers) {
+    if (layer.kind !== 'user_input') continue;
+    messages.push({ role: 'user', content: layer.content });
+  }
+
+  return messages;
+}
+
+/** 组装入口。 */
+export function assembleContext(input: AssembleInput): AssembledContext {
+  const charName = input.character.name.trim() || '角色';
+  const userName = input.userName?.trim() || '你';
+
+  const layers = collectLayers(input, charName, userName);
+
+  const contextWindow = input.budget?.contextWindow ?? DEFAULT_BUDGET.contextWindow;
+  const reservedForOutput = input.budget?.reservedForOutput ?? DEFAULT_BUDGET.reservedForOutput;
+  const safetyMargin = input.budget?.safetyMargin ?? DEFAULT_BUDGET.safetyMargin;
+
+  const budget: ContextBudget = {
+    contextWindow,
+    reservedForOutput,
+    safetyMargin,
+    available: Math.max(0, contextWindow - reservedForOutput - safetyMargin),
+    used: 0,
+    dropped: [],
+    truncated: false,
+  };
+
+  const { kept, dropped, notes } = applyBudget(layers, budget);
+  const used = kept.reduce((sum, layer) => sum + layer.tokens, 0);
+
+  budget.used = used;
+  budget.dropped = dropped;
+  budget.truncated = dropped.length > 0 || notes.length > 0;
+
+  if (used > budget.available) {
+    notes.push('裁剪后仍超出预算：本轮输入可能过长，建议调大 contextWindow 或缩短输入');
+  }
+
+  return {
+    messages: buildMessages(kept),
+    layers: kept,
+    budget,
+    notes,
+  };
+}
