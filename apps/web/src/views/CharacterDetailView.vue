@@ -12,6 +12,7 @@
           <n-button size="small" type="primary" :loading="saving" @click="save">保存</n-button>
         </template>
 
+        <n-button size="small" @click="previewOpen = true">预览上下文</n-button>
         <n-button size="small" :loading="exporting" @click="downloadPng">导出 PNG</n-button>
         <n-button size="small" :loading="exporting" @click="downloadJson">导出 JSON</n-button>
 
@@ -206,6 +207,14 @@
         </article>
       </div>
     </template>
+
+    <!-- 上下文预览：不调模型，只看「这一轮会发给模型什么」 -->
+    <ContextPreviewDrawer
+      v-if="character"
+      v-model:show="previewOpen"
+      :character-id="character.id"
+      :character-name="character.name"
+    />
   </section>
 </template>
 
@@ -215,6 +224,7 @@ import { NAlert, NButton, NInput, NPopconfirm, NSpin, NTag } from 'naive-ui';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { updateCharacter, exportCardJson, exportCardPngUrl } from '@/api/characters';
+import ContextPreviewDrawer from '@/components/ContextPreviewDrawer.vue';
 import { useCharacterStore } from '@/stores/characters';
 import { formatDateTime } from '@/utils/format';
 
@@ -232,6 +242,8 @@ const character = ref<Character | null>(null);
 const loading = ref(false);
 const saving = ref(false);
 const exporting = ref(false);
+/** 上下文预览抽屉 */
+const previewOpen = ref(false);
 const editing = ref(false);
 const error = ref<string | null>(null);
 
