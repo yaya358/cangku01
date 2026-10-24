@@ -17,6 +17,13 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '概览' },
   },
   {
+    path: '/playground',
+    name: 'playground',
+    // 懒加载：试话页只有真要用时才下载，首屏不为它买单
+    component: () => import('@/views/PlaygroundView.vue'),
+    meta: { title: '试话' },
+  },
+  {
     // 兜底路由放最后：匹配不到的一律进 404 页，而不是白屏
     path: '/:pathMatch(.*)*',
     name: 'not-found',

@@ -61,9 +61,12 @@ async function request<TData>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  // 允许直接传共享常量里的完整路径（/api/xxx），避免各处再手工剥前缀
+  const url = path.startsWith(API_BASE) ? path : `${API_BASE}${path}`;
+
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    response = await fetch(url, {
       method,
       signal: controller.signal,
       headers: {
