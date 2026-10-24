@@ -121,6 +121,14 @@ export interface ProviderAdapter extends Extension {
   readonly capabilities: ProviderCapabilities;
   /** 未显式指定 model 时用它 */
   readonly defaultModel: string;
+  /**
+   * 是否已配置凭据。
+   *
+   * 故意不在 setup 里因为「没配 Key」就抛错：那会让刚 clone 下来的项目
+   * 整个健康检查变降级、页面红一片。没 Key 也能启动，只是真正调用时
+   * 返回 NO_CREDENTIALS，UI 用这个字段标出来即可。
+   */
+  readonly hasCredentials?: boolean;
 
   /** 非流式：一次性拿到完整回复。 */
   chat(request: ChatRequest, options?: ChatCallOptions): Promise<ChatResult>;
