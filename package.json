@@ -32,6 +32,7 @@
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
+    "vitest": "^5.0.5",
     "vue-eslint-parser": "^10.4.1"
   }
 }
