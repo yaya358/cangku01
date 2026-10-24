@@ -17,6 +17,8 @@ import { ExtensionRegistry } from './core/extension/index.js';
 import type { Extension } from './core/extension/index.js';
 import { createProvidersFromConfig } from './core/provider/index.js';
 import { createSqliteStorage, resolveStoragePath } from './core/storage/index.js';
+import { createWorldbookRepository } from './core/worldbook/repository.js';
+import type { WorldbookRepository } from './core/worldbook/repository.js';
 import { AppError, toAppError } from './http/errors.js';
 import { failure } from './http/envelope.js';
 import { registerRoutes } from './http/routes/index.js';
@@ -138,6 +140,13 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
     characterRepo ??= createCharacterRepository(storage.db);
     return characterRepo;
+  });
+
+  let worldbookRepo: WorldbookRepository | null = null;
+  app.decorate('worldbook', (): WorldbookRepository => {
+    if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
+    worldbookRepo ??= createWorldbookRepository(storage.db);
+    return worldbookRepo;
   });
 
   // 配置里声明的模型服务按顺序注册成 provider 扩展；

@@ -32,12 +32,32 @@ export const SamplingParamsSchema = z.object({
 });
 export type SamplingParams = z.infer<typeof SamplingParamsSchema>;
 
+/** 上下文预算覆盖（压测与调试用，正常不必传）。 */
+export const ContextBudgetOverrideSchema = z
+  .object({
+    contextWindow: z.number().int().min(256).max(2_000_000),
+    reservedForOutput: z.number().int().min(0).max(500_000),
+    safetyMargin: z.number().int().min(0).max(100_000),
+  })
+  .partial();
+export type ContextBudgetOverride = z.infer<typeof ContextBudgetOverrideSchema>;
+
 /** 流式/非流式共用的请求体。 */
 export const ChatRequestBodySchema = z.object({
   /** provider 名；不传就用注册表里优先级最高的那个 */
   provider: z.string().min(1).optional(),
   /** 模型名；不传就用 provider 的默认模型 */
   model: z.string().min(1).optional(),
+  /**
+   * 用哪个角色。
+   * 传了就走上下文引擎（人设 + 世界书 + 预算裁剪）；
+   * 不传就走「裸对话」（messages 原样发给模型），供试话页调试用。
+   */
+  characterId: z.string().min(1).optional(),
+  /** {{user}} 的替换值 */
+  userName: z.string().min(1).max(40).optional(),
+  /** 覆盖上下文预算 */
+  budget: ContextBudgetOverrideSchema.optional(),
   messages: z.array(ChatMessageSchema).min(1, '至少需要一条消息').max(200),
   params: SamplingParamsSchema.optional(),
 });
@@ -58,7 +78,18 @@ export interface ChatUsage {
  * （EventSource 只支持 GET，发不了 JSON 请求体）。
  */
 export type ChatStreamPayload =
-  | { type: 'start'; traceId: string; provider: string; model: string }
+  | {
+      type: 'start';
+      traceId: string;
+      provider: string;
+      model: string;
+      /** 用了哪个角色（走上下文引擎时才有） */
+      character?: { id: string; name: string };
+      /** 本轮上下文占用的估算 token */
+      contextTokens?: number;
+      /** 命中的世界书条目数 */
+      worldbookHits?: number;
+    }
   | { type: 'delta'; text: string }
   | { type: 'usage'; usage: ChatUsage }
   | {
@@ -77,6 +108,12 @@ export interface ChatResultPayload {
   finishReason: string | null;
   durationMs: number;
   usage?: ChatUsage;
+  /** 用了哪个角色（走上下文引擎时才有） */
+  character?: { id: string; name: string };
+  /** 本轮上下文占用的估算 token */
+  contextTokens?: number;
+  /** 命中的世界书条目数 */
+  worldbookHits?: number;
 }
 
 /** provider 列表项（给设置面板用）。 */

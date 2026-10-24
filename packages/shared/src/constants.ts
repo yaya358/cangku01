@@ -50,3 +50,6 @@ export function characterExportPngEndpoint(id: string): string {
 export function characterExportJsonEndpoint(id: string): string {
   return `${characterEndpoint(id)}/export/json`;
 }
+
+/** 上下文预览（不调模型，只返回组装结果）。 */
+export const CONTEXT_PREVIEW_ENDPOINT = `${API_PREFIX}/context/preview`;

@@ -9,3 +9,4 @@ export * from './contracts/envelope.js';
 export * from './contracts/health.js';
 export * from './contracts/chat.js';
 export * from './contracts/character.js';
+export * from './contracts/context.js';

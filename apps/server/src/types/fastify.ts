@@ -5,6 +5,7 @@ import type { AvatarStore } from '../core/character/avatars.js';
 import type { CharacterRepository } from '../core/character/repository.js';
 import type { ExtensionRegistry } from '../core/extension/index.js';
 import type { SqliteStorage } from '../core/storage/index.js';
+import type { WorldbookRepository } from '../core/worldbook/repository.js';
 import type { AppLogger } from '../lib/logger.js';
 
 /**
@@ -46,5 +47,7 @@ declare module 'fastify' {
     characters: () => CharacterRepository;
     /** 头像文件存储（data/avatars） */
     avatars: AvatarStore;
+    /** 世界书仓储；同样按需创建 */
+    worldbook: () => WorldbookRepository;
   }
 }

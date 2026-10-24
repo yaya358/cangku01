@@ -1,4 +1,10 @@
-import type { ChatResultPayload, ChatStreamPayload, ProviderInfo } from '@tavern/shared';
+import type {
+  ChatMessage,
+  ChatRequestBody,
+  ChatResultPayload,
+  ChatStreamPayload,
+  ProviderInfo,
+} from '@tavern/shared';
 import {
   CHAT_ENDPOINT,
   CHAT_STREAM_ENDPOINT,
@@ -6,6 +12,7 @@ import {
   PROVIDERS_ENDPOINT,
 } from '@tavern/shared';
 import type { ServerResponse } from 'node:http';
+import { prepareConversationContext } from '../../core/context/index.js';
 import { describeProviders, firstProvider, listProviders } from '../../core/provider/index.js';
 import type { ChatStreamEvent, ProviderAdapter } from '../../core/provider/index.js';
 import type { AppInstance } from '../../types/fastify.js';
@@ -92,6 +99,46 @@ function writeEvent(raw: ServerResponse, payload: ChatStreamPayload): void {
   }
 }
 
+/** 解析后的消息，以及「这轮是怎么来的」元信息。 */
+interface ResolvedMessages {
+  messages: ChatMessage[];
+  /** 走上下文引擎时才有 */
+  character?: { id: string; name: string };
+  contextTokens?: number;
+  worldbookHits?: number;
+}
+
+/**
+ * 决定这一轮到底发给模型什么。
+ *
+ * 两条路径：
+ *   - 传了 characterId → 走上下文引擎：角色人设 + 世界书（按关键词触发）+ 预算裁剪
+ *   - 没传          → 裸对话：messages 原样发出去（试话页调试用）
+ */
+function resolveMessages(app: AppInstance, body: ChatRequestBody): ResolvedMessages {
+  if (!body.characterId) {
+    return { messages: [...body.messages] };
+  }
+
+  const character = app.characters().getById(body.characterId);
+  if (!character) throw AppError.notFound(`角色不存在: ${body.characterId}`);
+
+  const prepared = prepareConversationContext({
+    character,
+    entries: app.worldbook().listForCharacter(character.id),
+    messages: body.messages,
+    userName: body.userName,
+    budget: body.budget,
+  });
+
+  return {
+    messages: prepared.messages,
+    character: { id: character.id, name: character.name },
+    contextTokens: prepared.budget.used,
+    worldbookHits: prepared.worldbook.hits.length,
+  };
+}
+
 export function registerChatRoutes(app: AppInstance): void {
   app.get(PROVIDERS_ENDPOINT, async (request) => {
     const providers: ProviderInfo[] = describeProviders(app.extensions);
@@ -101,11 +148,12 @@ export function registerChatRoutes(app: AppInstance): void {
   app.post(CHAT_ENDPOINT, async (request) => {
     const body = parseBody(request.body);
     const provider = resolveProvider(app, body.provider);
+    const prepared = resolveMessages(app, body);
 
     const result = await provider.chat(
       {
         model: body.model ?? provider.defaultModel,
-        messages: body.messages,
+        messages: prepared.messages,
         params: body.params,
       },
       { requestId: request.id },
@@ -117,6 +165,13 @@ export function registerChatRoutes(app: AppInstance): void {
       finishReason: result.finishReason,
       durationMs: result.durationMs,
       usage: result.usage,
+      ...(prepared.character
+        ? {
+            character: prepared.character,
+            contextTokens: prepared.contextTokens,
+            worldbookHits: prepared.worldbookHits,
+          }
+        : {}),
     };
     return success(request.id, payload);
   });
@@ -126,6 +181,7 @@ export function registerChatRoutes(app: AppInstance): void {
     // 一旦接管响应，就没法再走统一的错误处理返回 JSON 了。
     const body = parseBody(request.body);
     const provider = resolveProvider(app, body.provider);
+    const prepared = resolveMessages(app, body);
 
     const controller = new AbortController();
     /**
@@ -149,19 +205,26 @@ export function registerChatRoutes(app: AppInstance): void {
     raw.write(': connected\n\n');
     raw.on('error', () => controller.abort());
 
-    // start 由路由发：带上前端需要的 provider 与 traceId
+    // start 由路由发：带上前端需要的 provider、traceId 与上下文元信息
     writeEvent(raw, {
       type: 'start',
       traceId: request.id,
       provider: provider.meta.name,
       model: body.model ?? provider.defaultModel,
+      ...(prepared.character
+        ? {
+            character: prepared.character,
+            contextTokens: prepared.contextTokens,
+            worldbookHits: prepared.worldbookHits,
+          }
+        : {}),
     });
 
     try {
       for await (const event of provider.stream(
         {
           model: body.model ?? provider.defaultModel,
-          messages: body.messages,
+          messages: prepared.messages,
           params: body.params,
         },
         { signal: controller.signal, requestId: request.id },
