@@ -79,6 +79,37 @@ export const ExtensionsConfigSchema = z.strictObject({
 });
 export type ExtensionsConfig = z.infer<typeof ExtensionsConfigSchema>;
 
+/** 目前只实现了 OpenAI 兼容协议；新增厂商时在这里加枚举值即可 */
+export const PROVIDER_TYPES = ['openai-compatible'] as const;
+export type ProviderType = (typeof PROVIDER_TYPES)[number];
+
+/**
+ * 一个模型服务。
+ *
+ * 密钥两种给法：
+ *   apiKeyEnv: DEEPSEEK_API_KEY   ← 推荐，密钥留在环境里，配置文件可以入版本库
+ *   apiKey: sk-xxx                ← 直接写，必须放在 config/user.yaml（已 gitignore）
+ * 两者都给时环境变量优先，避免本地残留的旧 Key 覆盖部署环境。
+ */
+export const ProviderConfigSchema = z.strictObject({
+  /** 全局唯一 id，日志与接口里引用它，例如 'deepseek' */
+  name: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/, '只允许小写字母/数字/点/下划线/短横线'),
+  type: z.enum(PROVIDER_TYPES).default('openai-compatible'),
+  baseUrl: z.string().url('必须是完整 URL，例如 https://api.deepseek.com/v1'),
+  /** 默认模型名，请求未指定 model 时用它 */
+  model: z.string().min(1),
+  apiKey: z.string().min(1).optional(),
+  /** 从这个环境变量读密钥 */
+  apiKeyEnv: z.string().min(1).optional(),
+  /** 额外请求头（例如某些中转站要求的 HTTP-Referer） */
+  headers: z.record(z.string(), z.string()).optional(),
+  /** 部分兼容实现不认 stream_options，可以关掉 */
+  requestStreamUsage: z.boolean().default(true),
+  /** 同类内初始化顺序，数值越大越靠前 */
+  priority: z.number().int().default(0),
+});
+export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
+
 /** 根配置。 */
 export const AppConfigSchema = z.strictObject({
   app: AppMetaConfigSchema.default(sectionDefaults(AppMetaConfigSchema)),
@@ -88,6 +119,8 @@ export const AppConfigSchema = z.strictObject({
   extensions: ExtensionsConfigSchema.default(sectionDefaults(ExtensionsConfigSchema)),
   /** 功能开关，扩展会拿到这份快照，例如 { plugins: true } */
   features: z.record(z.string(), z.boolean()).default({}),
+  /** 模型服务列表，按顺序注册成 provider 扩展 */
+  providers: z.array(ProviderConfigSchema).default([]),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

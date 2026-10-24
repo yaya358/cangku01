@@ -50,3 +50,15 @@ extensions:
 # 需要时在 user.yaml 里加：
 # features:
 #   plugins: true
+
+# 模型服务列表（默认空）。每个条目会注册成一个 provider 扩展。
+# 密钥建议用 apiKeyEnv 从环境变量读；直接写 apiKey 一定要放在 user.yaml。
+#
+# providers:
+#   - name: deepseek
+#     type: openai-compatible
+#     baseUrl: https://api.deepseek.com/v1
+#     model: deepseek-flash
+#     apiKeyEnv: DEEPSEEK_API_KEY
+#     priority: 10
+providers: []

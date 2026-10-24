@@ -8,6 +8,7 @@ import type { Logger } from 'pino';
 import type { AppConfig } from './config/schema.js';
 import { ExtensionRegistry } from './core/extension/index.js';
 import type { Extension } from './core/extension/index.js';
+import { createProvidersFromConfig } from './core/provider/index.js';
 import { toAppError } from './http/errors.js';
 import { failure } from './http/envelope.js';
 import { registerRoutes } from './http/routes/index.js';
@@ -89,8 +90,13 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     strict: config.extensions.strict,
     maxSetupPasses: config.extensions.maxSetupPasses,
   });
-  if (options.extensions?.length) {
-    extensions.register(...options.extensions);
+
+  // 配置里声明的模型服务按顺序注册成 provider 扩展；
+  // 之后再注册调用方传进来的扩展（测试、上层模块）。
+  const providers = createProvidersFromConfig(config.providers);
+  const declaredExtensions = [...providers, ...(options.extensions ?? [])];
+  if (declaredExtensions.length > 0) {
+    extensions.register(...declaredExtensions);
   }
   app.decorate('extensions', extensions);
 

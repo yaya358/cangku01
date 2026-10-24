@@ -7,3 +7,6 @@
 export * from './types.js';
 export * from './errors.js';
 export * from './helpers.js';
+export * from './factory.js';
+export * from './openai-compatible.js';
+export * from './sse.js';
