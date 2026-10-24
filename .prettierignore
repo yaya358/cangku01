@@ -1,0 +1,13 @@
+**/dist/**
+**/node_modules/**
+pnpm-lock.yaml
+coverage/**
+data/**
+logs/**
+
+# 中文文档由人工排版，交给 prettier 只会打乱表格与断行
+*.md
+docs/**
+
+# 用户私有配置不入库也不需要格式化
+config/user.yaml
