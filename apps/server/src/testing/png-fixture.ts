@@ -19,15 +19,43 @@ function makeChunk(type: string, data: Buffer): Buffer {
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+/** 图片边长（像素）。 */
+const SIZE = 64;
+
+/**
+ * 生成真正可解码的图像数据（IDAT）。
+ *
+ * 只有 IHDR + 文本块 + IEND 的 PNG 结构合法但**没有像素**，
+ * 浏览器会显示成裂图。测试里要断言头像能被浏览器渲染，就得给真像素：
+ * 每行 = 1 字节过滤标记(0) + SIZE 个 RGBA 像素。
+ */
+function makeImageData(): Buffer {
+  const rowLength = 1 + SIZE * 4;
+  const raw = Buffer.alloc(rowLength * SIZE);
+  for (let y = 0; y < SIZE; y += 1) {
+    const rowStart = y * rowLength;
+    raw[rowStart] = 0; // filter: None
+    for (let x = 0; x < SIZE; x += 1) {
+      const offset = rowStart + 1 + x * 4;
+      raw[offset] = 0x2a; // R
+      raw[offset + 1] = 0x21; // G
+      raw[offset + 2] = 0x18; // B
+      raw[offset + 3] = 0xff; // A
+    }
+  }
+  return deflateSync(raw);
+}
+
 function makeBasePng(textChunks: Buffer[] = []): Buffer {
   const ihdrData = Buffer.alloc(13);
-  ihdrData.writeUInt32BE(64, 0);
-  ihdrData.writeUInt32BE(64, 4);
+  ihdrData.writeUInt32BE(SIZE, 0);
+  ihdrData.writeUInt32BE(SIZE, 4);
   ihdrData[8] = 8; // bit depth
   ihdrData[9] = 6; // RGBA
   return Buffer.concat([
     SIGNATURE,
     makeChunk('IHDR', ihdrData),
+    makeChunk('IDAT', makeImageData()),
     ...textChunks,
     makeChunk('IEND', Buffer.alloc(0)),
   ]);

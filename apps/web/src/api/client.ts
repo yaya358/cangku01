@@ -86,6 +86,16 @@ async function request<TData>(
   }
 
   const text = await response.text();
+  return unwrapEnvelope<TData>(response, text);
+}
+
+/**
+ * 把「响应 + 已读出的文本」拆成数据。
+ *
+ * 独立出来是为了让上传（原始 PNG 字节）这类不经过 request() 的调用
+ * 也能复用同一套错误处理，不必各写一遍。
+ */
+export function unwrapEnvelope<TData>(response: Response, text: string): TData {
   let body: ApiEnvelope<TData> | null = null;
   try {
     body = text.length > 0 ? (JSON.parse(text) as ApiEnvelope<TData>) : null;
@@ -124,4 +134,53 @@ export function apiPost<TData>(
   options?: RequestOptions,
 ): Promise<TData> {
   return request<TData>('POST', path, { ...options, body });
+}
+
+export function apiPatch<TData>(path: string, body?: unknown): Promise<TData> {
+  return request<TData>('PATCH', path, { body });
+}
+
+export function apiDelete<TData>(path: string): Promise<TData> {
+  return request<TData>('DELETE', path);
+}
+
+/**
+ * 直接把原始字节 POST 出去（角色卡 PNG 导入用）。
+ *
+ * 不走 request()：那里会把 body 当 JSON 序列化，而这里要的是文件字节。
+ * 响应仍复用同一套信封拆包逻辑。
+ */
+export async function postBinary<TData>(
+  path: string,
+  body: Blob | ArrayBuffer,
+  contentType: string,
+  options: RequestOptions = {},
+): Promise<TData> {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const url = path.startsWith(API_BASE) ? path : `${API_BASE}${path}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { accept: 'application/json', 'content-type': contentType },
+      body,
+    });
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') {
+      throw new ApiError(`上传超时（${timeoutMs}ms）`, { status: 0, code: 'TIMEOUT' });
+    }
+    throw new ApiError('上传失败，无法连接后端服务', {
+      status: 0,
+      code: 'NETWORK_ERROR',
+      details: cause,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return unwrapEnvelope<TData>(response, await response.text());
 }

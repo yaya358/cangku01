@@ -18,6 +18,7 @@
 
           <nav class="nav">
             <RouterLink class="nav__link" to="/">概览</RouterLink>
+            <RouterLink class="nav__link" to="/characters">角色</RouterLink>
             <RouterLink class="nav__link" to="/playground">试话</RouterLink>
             <a class="nav__link" href="/api/health" target="_blank" rel="noreferrer">接口自测</a>
           </nav>
@@ -28,7 +29,7 @@
         </main>
 
         <footer class="footer">
-          <span>阶段 2 · 模型接入层 · v{{ appVersion }}</span>
+          <span>阶段 3 · 角色卡 · v{{ appVersion }}</span>
           <span class="footer__sep" aria-hidden="true">|</span>
           <span>Fastify 后端 + Vue3 前端，同仓 pnpm workspace</span>
         </footer>

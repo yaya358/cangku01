@@ -17,6 +17,18 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '概览' },
   },
   {
+    path: '/characters',
+    name: 'characters',
+    component: () => import('@/views/CharactersView.vue'),
+    meta: { title: '角色' },
+  },
+  {
+    path: '/characters/:id',
+    name: 'character-detail',
+    component: () => import('@/views/CharacterDetailView.vue'),
+    meta: { title: '角色详情' },
+  },
+  {
     path: '/playground',
     name: 'playground',
     // 懒加载：试话页只有真要用时才下载，首屏不为它买单
