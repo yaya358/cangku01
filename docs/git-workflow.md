@@ -72,55 +72,63 @@ git push                    # 推送到 GitHub
 
 ---
 
-## 四、本项目提交计划（34 次）
+## 四、本项目提交计划
 
-### 阶段 0：基建（1 天）
-1. `chore: 初始化项目结构与 .gitignore`
-2. `docs: 增加 README 与架构说明`
-3. `chore: 配置 ESLint + Prettier`
-4. `chore: 后端服务骨架与 /api/health`
-5. `chore: 前端 Vue3 + Vite 骨架`
+> 计划会随实际进展微调：拆分出来的提交记在对应阶段下，目标始终是「一次提交一件事、提交后能跑」。
+
+### 阶段 0：基建（已完成，8 次提交）
+
+| # | 提交信息 | 内容 |
+|---|---|---|
+| 1 | `chore: 初始化 pnpm 单仓与目录结构` | workspace 布局、tsconfig 基线、shared 包骨架 |
+| 2 | `chore: 配置 ESLint + Prettier` | ESLint 10 扁平配置、Prettier、.gitattributes |
+| 3 | `chore: 后端 Fastify 骨架、分层目录与 /api/health` | 响应信封、错误归一、traceId、日志钩子、inject 测试 |
+| 4 | `feat(core): 扩展点注册表与生命周期管理` | 五类扩展、排序、失败隔离、逆序释放 |
+| 5 | `chore: 配置系统（yaml 分层合并 + zod 校验）` | schema 权威化、深合并、来源追踪 |
+| 6 | `feat(config): 环境变量覆盖与配置来源追踪` | `TAVERN_` 映射、类型还原、PaaS 别名 |
+| 7 | `chore: 前端 Vue3 + Vite + Pinia + Naive UI 骨架与代理联调` | 契约校验、状态仓库、深色主题、404 兜底 |
+| 8 | `feat(server): 生产模式下托管前端静态资源与 SPA 回落` | 单端口整站、缓存分层、自动发现 dist |
 
 ### 阶段 1：模型接入层（约 700 行）
-6. `feat(provider): 定义 provider 适配器接口`
-7. `feat(provider): 实现 OpenAI 兼容接口与流式输出`
-8. `feat(provider): 支持自定义 baseURL 与采样参数`
-9. `feat(provider): API Key 加密存储`
-10. `feat(provider): token 用量统计与失败重试`
+9. `feat(provider): 定义 provider 适配器接口`
+10. `feat(provider): 实现 OpenAI 兼容接口与流式输出`
+11. `feat(provider): 支持自定义 baseURL 与采样参数`
+12. `feat(provider): API Key 加密存储`
+13. `feat(provider): token 用量统计与失败重试`
 
 ### 阶段 2：角色卡（约 600 行）
-11. `feat(character): 角色卡数据模型与 CRUD 接口`
-12. `feat(character): PNG tEXt chunk 解析与角色卡导入`
-13. `feat(character): 角色卡导出为社区格式`
-14. `feat(frontend): 角色列表与详情页`
+14. `feat(character): 角色卡数据模型与 CRUD 接口`
+15. `feat(character): PNG tEXt chunk 解析与角色卡导入`
+16. `feat(character): 角色卡导出为社区格式`
+17. `feat(frontend): 角色列表与详情页`
 
 ### 阶段 3：上下文引擎（约 900 行，项目核心）
-15. `feat(context): 上下文分层组装管线`
-16. `feat(context): token 预算分配器`
-17. `feat(context): 世界书关键词触发与递归扫描`
-18. `feat(context): prompt 组装结果预览接口`
-19. `feat(frontend): 上下文预览面板`
+18. `feat(context): 上下文分层组装管线`
+19. `feat(context): token 预算分配器`
+20. `feat(context): 世界书关键词触发与递归扫描`
+21. `feat(context): prompt 组装结果预览接口`
+22. `feat(frontend): 上下文预览面板`
 
 ### 阶段 4：聊天与分支（约 900 行）
-20. `feat(chat): 会话与消息数据模型`
-21. `feat(chat): SSE 流式对话接口`
-22. `feat(chat): 停止生成 / 重生成 / 编辑消息`
-23. `feat(chat): 滑动候选 swipes`
-24. `feat(chat): 对话树分支（时间线）`
-25. `feat(frontend): 聊天主界面与流式渲染`
+23. `feat(chat): 会话与消息数据模型`
+24. `feat(chat): SSE 流式对话接口`
+25. `feat(chat): 停止生成 / 重生成 / 编辑消息`
+26. `feat(chat): 滑动候选 swipes`
+27. `feat(chat): 对话树分支（时间线）`
+28. `feat(frontend): 聊天主界面与流式渲染`
 
 ### 阶段 5：记忆与群聊（约 800 行）
-26. `feat(memory): 滚动摘要压缩`
-27. `feat(memory): 剧情事实表`
-28. `feat(chat): 多角色群聊与发言调度`
-29. `feat(frontend): 群聊界面`
+29. `feat(memory): 滚动摘要压缩`
+30. `feat(memory): 剧情事实表`
+31. `feat(chat): 多角色群聊与发言调度`
+32. `feat(frontend): 群聊界面`
 
 ### 阶段 6：收尾（约 600 行）
-30. `feat(io): SillyTavern 数据导入导出`
-31. `feat: 主题切换与快捷键`
-32. `test: 核心上下文引擎单元测试`
-33. `docs: 完整使用文档`
-34. `chore: Docker 部署配置`
+33. `feat(io): SillyTavern 数据导入导出`
+34. `feat: 主题切换与快捷键`
+35. `test: 核心上下文引擎单元测试`
+36. `docs: 完整使用文档`
+37. `chore: Docker 部署配置`
 
 ---
 
