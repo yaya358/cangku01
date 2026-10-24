@@ -70,6 +70,45 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('CREATE INDEX idx_worldbook_priority ON worldbook_entries (priority DESC)');
     },
   },
+  {
+    version: 3,
+    name: 'conversations',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE conversations (
+          id             TEXT PRIMARY KEY,
+          character_id   TEXT NOT NULL REFERENCES characters (id) ON DELETE CASCADE,
+          title          TEXT NOT NULL DEFAULT '',
+          active_leaf_id TEXT,
+          created_at     TEXT NOT NULL,
+          updated_at     TEXT NOT NULL
+        )
+      `);
+      db.exec('CREATE INDEX idx_conversations_character ON conversations (character_id)');
+      db.exec('CREATE INDEX idx_conversations_updated ON conversations (updated_at DESC)');
+
+      db.exec(`
+        CREATE TABLE messages (
+          id               TEXT PRIMARY KEY,
+          conversation_id  TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
+          parent_id        TEXT REFERENCES messages (id) ON DELETE SET NULL,
+          role             TEXT NOT NULL,
+          content          TEXT NOT NULL DEFAULT '',
+          swipes           TEXT NOT NULL DEFAULT '[]',
+          swipe_index      INTEGER NOT NULL DEFAULT 0,
+          model            TEXT,
+          provider         TEXT,
+          usage            TEXT,
+          finish_reason    TEXT,
+          duration_ms      INTEGER,
+          first_token_ms   INTEGER,
+          created_at       TEXT NOT NULL
+        )
+      `);
+      db.exec('CREATE INDEX idx_messages_conversation ON messages (conversation_id, created_at)');
+      db.exec('CREATE INDEX idx_messages_parent ON messages (parent_id)');
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */
