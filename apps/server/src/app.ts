@@ -4,30 +4,28 @@ import { APP_VERSION } from '@tavern/shared';
 import Fastify, { LogController } from 'fastify';
 import type { FastifyError } from 'fastify';
 import type { Logger } from 'pino';
+import type { AppConfig } from './config/schema.js';
 import { ExtensionRegistry } from './core/extension/index.js';
 import type { Extension } from './core/extension/index.js';
 import { toAppError } from './http/errors.js';
 import { failure } from './http/envelope.js';
 import { registerRoutes } from './http/routes/index.js';
-import { createLogger } from './lib/logger.js';
-import { resolveRuntime } from './lib/runtime.js';
-import type { ServerRuntime } from './lib/runtime.js';
+import { createLogger, loggerConfigFromApp } from './lib/logger.js';
 import type { AppInstance } from './types/fastify.js';
 
-/** 构建 Fastify 实例的可选覆盖项，测试会用它替代端口/日志。 */
+/** 构建 Fastify 实例的入参。 */
 export interface BuildAppOptions {
-  runtime?: ServerRuntime;
+  /**
+   * 已校验的配置。故意必填：配置决定端口、CORS、日志级别，
+   * 给它一个「隐藏默认值」只会让测试和线上行为不一致。
+   */
+  config: AppConfig;
+  /** 外部传入的日志器；不传则按配置新建 */
   logger?: Logger;
-  /** true = 反射请求 Origin；数组 = 白名单 */
-  corsOrigin?: boolean | string[];
-  /** 请求体上限，默认 2MB（角色卡 PNG 走 multipart，不占这个额度） */
-  bodyLimit?: number;
+  /** 实际读到的配置文件路径，仅用于展示与健康检查 */
+  configSources?: readonly string[];
   /** 启动前预置的扩展；后续各业务模块通过它挂进核心 */
   extensions?: readonly Extension[];
-  /** 功能开关快照，透传给扩展上下文 */
-  features?: Record<string, boolean>;
-  /** true = 任何一个扩展初始化失败就中断启动 */
-  strictExtensions?: boolean;
 }
 
 /**
@@ -36,26 +34,46 @@ export interface BuildAppOptions {
  * 这个函数只负责「把零件接起来」，不负责 listen —— 因为测试里需要
  * 用 app.inject() 打请求，一旦它自己开始监听就没法测了。
  */
-export async function buildApp(options: BuildAppOptions = {}): Promise<AppInstance> {
-  const runtime = options.runtime ?? resolveRuntime();
-  const logger =
-    options.logger ??
-    createLogger({
-      level: process.env.TAVERN_LOG_LEVEL ?? (runtime.env === 'production' ? 'info' : 'debug'),
-      pretty: runtime.env !== 'production',
-    });
+export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
+  const { config } = options;
+  const logger = options.logger ?? createLogger(loggerConfigFromApp(config));
 
   const app = Fastify({
     loggerInstance: logger,
     genReqId: () => randomUUID(),
-    bodyLimit: options.bodyLimit ?? 2 * 1024 * 1024,
+    bodyLimit: Math.round(config.server.bodyLimitMb * 1024 * 1024),
     // 关掉 Fastify 默认的「收到/完成」两条日志，改用下面 onResponse 里带耗时的单条。
     // 注意：顶层的 disableRequestLogging 在 fastify@6 会被移除，这里用新的 logController。
     logController: new LogController({ disableRequestLogging: true }),
   });
 
+  // 依赖通过装饰器挂载，路由与钩子直接 app.config / app.extensions 取用
+  app.decorate('config', config);
+  app.decorate('configSources', options.configSources ?? []);
+
+  /**
+   * 扩展点注册表。
+   *
+   * 必须在挂路由之前 decorate：路由注册阶段就可能需要读注册表
+   * （例如「按 provider 数量动态生成选项接口」）。
+   * 真正的初始化放到 onReady —— 那时 Fastify 已就绪、配置已解析完，
+   * 又早于 listen 开始接流量。
+   */
+  const extensions = new ExtensionRegistry({
+    logger,
+    env: config.app.env,
+    appVersion: APP_VERSION,
+    features: config.features,
+    strict: config.extensions.strict,
+    maxSetupPasses: config.extensions.maxSetupPasses,
+  });
+  if (options.extensions?.length) {
+    extensions.register(...options.extensions);
+  }
+  app.decorate('extensions', extensions);
+
   await app.register(cors, {
-    origin: options.corsOrigin ?? true,
+    origin: config.server.corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['content-type', 'authorization', 'x-request-id'],
@@ -96,27 +114,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<AppInstan
     );
   });
 
-  /**
-   * 扩展点注册表。
-   *
-   * 必须在挂路由之前 decorate：路由注册阶段就可能需要读注册表
-   * （例如「按 provider 数量动态生成选项接口」）。
-   * 真正的初始化放到 onReady —— 那时 Fastify 已就绪、配置已解析完，
-   * 又早于 listen 开始接流量。
-   */
-  const extensions = new ExtensionRegistry({
-    logger,
-    env: runtime.env,
-    appVersion: APP_VERSION,
-    features: options.features,
-    strict: options.strictExtensions,
-  });
-  if (options.extensions?.length) {
-    extensions.register(...options.extensions);
-  }
-  app.decorate('extensions', extensions);
-
-  await registerRoutes(app, runtime);
+  await registerRoutes(app);
 
   app.addHook('onReady', async () => {
     await extensions.setupAll();
@@ -126,6 +124,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<AppInstan
     await extensions.disposeAll();
   });
 
-  app.log.debug({ host: runtime.host, port: runtime.port }, 'Fastify 实例构建完成');
+  app.log.debug(
+    { host: config.server.host, port: config.server.port, env: config.app.env },
+    'Fastify 实例构建完成',
+  );
   return app;
 }

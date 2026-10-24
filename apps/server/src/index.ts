@@ -1,7 +1,8 @@
 import type { Logger } from 'pino';
 import { buildApp } from './app.js';
-import { createLogger } from './lib/logger.js';
-import { resolveRuntime } from './lib/runtime.js';
+import { ConfigError, loadConfig } from './config/index.js';
+import type { LoadedConfig } from './config/index.js';
+import { createLogger, loggerConfigFromApp } from './lib/logger.js';
 import type { AppInstance } from './types/fastify.js';
 
 /** 优雅退出的最长等待时间：超过就强杀，避免容器里卡住不退出。 */
@@ -54,21 +55,44 @@ function installProcessGuards(app: AppInstance, logger: Logger): void {
   });
 }
 
-async function main(): Promise<void> {
-  const runtime = resolveRuntime();
-  const logger = createLogger({
-    level: process.env.TAVERN_LOG_LEVEL ?? (runtime.env === 'production' ? 'info' : 'debug'),
-    pretty: runtime.env !== 'production',
-  });
+/** 配置加载失败时把每条 issue 打出来再退出，比抛一个笼统的栈有用得多。 */
+function loadConfigOrExit(): LoadedConfig {
+  try {
+    return loadConfig();
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      console.error(`[tavern] 配置加载失败：${error.message}`);
+      for (const issue of error.issues) console.error(`  - ${issue}`);
+      process.exit(1);
+    }
+    throw error;
+  }
+}
 
-  const app = await buildApp({ runtime, logger });
+async function main(): Promise<void> {
+  const loaded = loadConfigOrExit();
+  const config = loaded.config;
+  const logger = createLogger(loggerConfigFromApp(config));
+
+  const app = await buildApp({ config, configSources: loaded.sources, logger });
   installProcessGuards(app, logger);
 
-  await app.listen({ host: runtime.host, port: runtime.port });
-
-  const address = `http://${runtime.host}:${runtime.port}`;
   logger.info(
-    { address, health: `${address}/api/health`, env: runtime.env, node: process.version },
+    { configDir: loaded.configDir, sources: loaded.sources, env: config.app.env },
+    `配置已加载（${loaded.sources.length} 个文件）`,
+  );
+
+  await app.listen({ host: config.server.host, port: config.server.port });
+
+  const address = `http://${config.server.host}:${config.server.port}`;
+  logger.info(
+    {
+      address,
+      health: `${address}/api/health`,
+      env: config.app.env,
+      storage: `${config.storage.driver} → ${config.storage.path}`,
+      node: process.version,
+    },
     `酒馆 AI 后端已就绪 → ${address}`,
   );
 }

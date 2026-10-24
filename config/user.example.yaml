@@ -1,0 +1,21 @@
+# 个人配置示例
+#
+# 复制成 config/user.yaml 后按需修改：
+#   Windows:  Copy-Item config\user.example.yaml config\user.yaml
+#   macOS/Linux: cp config/user.example.yaml config/user.yaml
+#
+# user.yaml 已在 .gitignore 中，写进去的 API Key 不会被提交。
+# 只需要写「要改的那几项」，其余自动继承 default.yaml（深合并，不是整体替换）。
+
+server:
+  port: 8788
+
+logging:
+  level: debug
+
+# 各模型服务的密钥统一放这里，后续 provider 扩展会读取
+# （本阶段还没有 provider 实现，先把位置留好）
+# providers:
+#   openai:
+#     apiKey: sk-xxxx
+#     baseUrl: https://api.openai.com/v1

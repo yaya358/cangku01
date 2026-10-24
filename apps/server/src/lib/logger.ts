@@ -1,5 +1,6 @@
 import { pino } from 'pino';
 import type { Logger, LoggerOptions } from 'pino';
+import type { AppConfig } from '../config/schema.js';
 
 /** 日志配置：level 控制安静程度，pretty 仅在开发期打开（生产用 JSON 便于采集）。 */
 export interface LoggerConfig {
@@ -54,3 +55,16 @@ export function createLogger(config: LoggerConfig = { level: 'info', pretty: fal
 
 /** 供扩展点/测试使用的最小日志接口，避免各处直接依赖 pino 类型。 */
 export type AppLogger = Logger;
+
+/**
+ * 从应用配置推导日志配置。
+ *
+ * pretty 留空时按环境推导：development 开彩色，production 走纯 JSON
+ * （容器日志采集需要单行结构化，彩色控制符是纯噪音）。
+ */
+export function loggerConfigFromApp(config: AppConfig): LoggerConfig {
+  return {
+    level: config.logging.level,
+    pretty: config.logging.pretty ?? config.app.env !== 'production',
+  };
+}

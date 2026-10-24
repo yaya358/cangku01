@@ -1,37 +1,38 @@
 import { APP_NAME, APP_VERSION, HEALTH_ENDPOINT, summarizeHealth } from '@tavern/shared';
 import type { HealthCheck, HealthExtensions, HealthPayload } from '@tavern/shared';
 import { success } from '../envelope.js';
-import { currentMemoryMb, processStartedAt } from '../../lib/runtime.js';
-import type { ServerRuntime } from '../../lib/runtime.js';
+import { currentMemoryMb, processStartedAt, roundSeconds } from '../../lib/runtime.js';
+import type { AppConfig } from '../../config/schema.js';
 import type { AppInstance } from '../../types/fastify.js';
 
 /** 超过这个常驻内存就报 degraded，用来及早发现泄漏而不是等 OOM。 */
 const MEMORY_WARN_MB = 1024;
 
 /** 自检时能拿到的所有依赖，新增检查项往这里加字段即可。 */
-interface HealthContext {
-  runtime: ServerRuntime;
+export interface HealthDeps {
+  config: AppConfig;
   extensions: HealthExtensions;
+  /** 实际读到的配置文件路径，用来显示「配置从哪来」 */
+  configSources: readonly string[];
 }
 
 /** 一项自检的定义。返回值允许是 Promise，方便后续接存储探活。 */
 interface CheckDefinition {
   name: string;
-  run: (context: HealthContext) => HealthCheck | Promise<HealthCheck>;
+  run: (deps: HealthDeps) => HealthCheck | Promise<HealthCheck>;
 }
 
-/**
- * 自检清单。
- *
- * 阶段 0-F 会在这里追加 config 一项；接数据库时再加 storage（带一次真实 ping）。
- */
+/** 自检清单。接数据库时再加 storage（带一次真实 ping）。 */
 const DEFINITIONS: readonly CheckDefinition[] = [
   {
-    name: 'runtime',
-    run: ({ runtime }) => ({
-      name: 'runtime',
-      status: runtime.port > 0 ? 'ok' : 'failed',
-      message: `${runtime.env} · ${runtime.host}:${runtime.port}`,
+    name: 'config',
+    run: ({ configSources, config }) => ({
+      name: 'config',
+      status: 'ok',
+      message:
+        configSources.length === 0
+          ? `内置默认值 · ${config.app.env}`
+          : `${configSources.length} 个配置文件 · ${config.app.env}`,
     }),
   },
   {
@@ -64,10 +65,10 @@ function roundMs(value: number): number {
 }
 
 /** 跑一项检查：单项失败不允许拖垮整个健康检查。 */
-async function runCheck(definition: CheckDefinition, context: HealthContext): Promise<HealthCheck> {
+async function runCheck(definition: CheckDefinition, deps: HealthDeps): Promise<HealthCheck> {
   const startedAt = performance.now();
   try {
-    const result = await definition.run(context);
+    const result = await definition.run(deps);
     return { ...result, latencyMs: roundMs(performance.now() - startedAt) };
   } catch (error) {
     return {
@@ -80,31 +81,26 @@ async function runCheck(definition: CheckDefinition, context: HealthContext): Pr
 }
 
 /** 组装健康载荷。抽出来是为了让测试可以直接断言，不必起 HTTP。 */
-export async function buildHealthPayload(
-  runtime: ServerRuntime,
-  extensions: HealthExtensions,
-): Promise<HealthPayload> {
-  const checks = await Promise.all(
-    DEFINITIONS.map((item) => runCheck(item, { runtime, extensions })),
-  );
+export async function buildHealthPayload(deps: HealthDeps): Promise<HealthPayload> {
+  const checks = await Promise.all(DEFINITIONS.map((item) => runCheck(item, deps)));
 
   return {
     status: summarizeHealth(checks),
     app: {
       name: APP_NAME,
       version: APP_VERSION,
-      env: runtime.env,
+      env: deps.config.app.env,
       startedAt: processStartedAt.toISOString(),
-      uptimeSeconds: Math.round(process.uptime() * 100) / 100,
+      uptimeSeconds: roundSeconds(process.uptime()),
       nodeVersion: process.version,
     },
     server: {
-      host: runtime.host,
-      port: runtime.port,
+      host: deps.config.server.host,
+      port: deps.config.server.port,
       pid: process.pid,
       memoryMb: currentMemoryMb(),
     },
-    extensions,
+    extensions: deps.extensions,
     checks,
   };
 }
@@ -115,8 +111,15 @@ export async function buildHealthPayload(
  * 前端首页会轮询它：拿到 ok 就点亮「后端已连接」，
  * 拿到 degraded 就把具体是哪一项不健康显示出来。
  */
-export function registerHealthRoutes(app: AppInstance, runtime: ServerRuntime): void {
+export function registerHealthRoutes(app: AppInstance): void {
   app.get(HEALTH_ENDPOINT, async (request) =>
-    success(request.id, await buildHealthPayload(runtime, app.extensions.summary())),
+    success(
+      request.id,
+      await buildHealthPayload({
+        config: app.config,
+        configSources: app.configSources,
+        extensions: app.extensions.summary(),
+      }),
+    ),
   );
 }

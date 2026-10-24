@@ -1,0 +1,49 @@
+# 酒馆 AI —— 默认配置
+#
+# 这个文件是「出厂设置」，会随代码提交，所有人都一样。
+# 个人改动请写进 config/user.yaml（已被 .gitignore 忽略，不会误提交密钥）。
+#
+# 合并顺序：内置默认值 → 本文件 → user.yaml → 环境变量
+# 字段含义与取值范围见 apps/server/src/config/schema.ts
+
+app:
+  # 显示名，出现在前端标题、健康检查与日志里
+  name: 酒馆 AI
+  # development | production | test
+  # production 会关掉彩色日志、隐藏错误细节
+  env: development
+
+server:
+  # 监听地址。只在本机用就保持 127.0.0.1；要手机/局域网访问改成 0.0.0.0
+  host: 127.0.0.1
+  port: 8787
+  # 普通 JSON 请求体上限（MB），角色卡 PNG 走 multipart 不吃这个额度
+  bodyLimitMb: 2
+  # 开发期反射任意来源；上线请改成明确的数组，例如 ["https://tavern.example.com"]
+  corsOrigins: true
+
+logging:
+  # fatal | error | warn | info | debug | trace | silent
+  level: info
+  # 不填则按 env 推导：development 彩色、production 纯 JSON。
+  # 想强制指定就取消下面注释：
+  # pretty: true
+  # 预留：写文件日志的路径，null 表示只输出到 stdout
+  file: null
+
+storage:
+  # sqlite | json
+  driver: sqlite
+  # 相对路径以仓库根目录为基准
+  path: ./data/tavern.db
+
+extensions:
+  # true = 任何扩展初始化失败都中断启动（排查问题时临时打开）
+  strict: false
+  # 扩展在 setup 期间注册子扩展时的最大轮次
+  maxSetupPasses: 5
+
+# 功能开关（默认是空对象，扩展会拿到这份快照）。
+# 需要时在 user.yaml 里加：
+# features:
+#   plugins: true

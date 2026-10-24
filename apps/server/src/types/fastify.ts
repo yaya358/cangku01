@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FastifyInstance, FastifyTypeProviderDefault, RawServerDefault } from 'fastify';
+import type { AppConfig } from '../config/schema.js';
 import type { ExtensionRegistry } from '../core/extension/index.js';
 import type { AppLogger } from '../lib/logger.js';
 
@@ -28,5 +29,9 @@ declare module 'fastify' {
   interface FastifyInstance {
     /** 扩展点注册表，见 core/extension */
     extensions: ExtensionRegistry;
+    /** 已校验的只读配置，路由里直接 app.config.server.port 这样用 */
+    config: AppConfig;
+    /** 实际读到的配置文件绝对路径，按合并顺序排列 */
+    configSources: readonly string[];
   }
 }
