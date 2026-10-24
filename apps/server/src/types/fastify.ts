@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FastifyInstance, FastifyTypeProviderDefault, RawServerDefault } from 'fastify';
 import type { AppConfig } from '../config/schema.js';
+import type { AvatarStore } from '../core/character/avatars.js';
 import type { CharacterRepository } from '../core/character/repository.js';
 import type { ExtensionRegistry } from '../core/extension/index.js';
 import type { SqliteStorage } from '../core/storage/index.js';
@@ -43,5 +44,7 @@ declare module 'fastify' {
     storage: SqliteStorage;
     /** 角色仓储；内部按需创建，数据库没就绪时调用会抛错 */
     characters: () => CharacterRepository;
+    /** 头像文件存储（data/avatars） */
+    avatars: AvatarStore;
   }
 }

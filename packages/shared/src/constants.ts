@@ -24,3 +24,19 @@ export const CHAT_ENDPOINT = `${API_PREFIX}/chat`;
 
 /** 流式对话接口路径（SSE）。 */
 export const CHAT_STREAM_ENDPOINT = `${API_PREFIX}/chat/stream`;
+
+/** 角色卡集合路径。 */
+export const CHARACTERS_ENDPOINT = `${API_PREFIX}/characters`;
+
+/** 角色卡导入路径（按 content-type 区分 PNG / JSON）。 */
+export const CHARACTER_IMPORT_ENDPOINT = `${CHARACTERS_ENDPOINT}/import`;
+
+/** 单个角色路径。 */
+export function characterEndpoint(id: string): string {
+  return `${CHARACTERS_ENDPOINT}/${encodeURIComponent(id)}`;
+}
+
+/** 角色头像路径。 */
+export function characterAvatarEndpoint(id: string): string {
+  return `${characterEndpoint(id)}/avatar`;
+}

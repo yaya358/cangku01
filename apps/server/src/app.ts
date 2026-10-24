@@ -6,6 +6,11 @@ import Fastify, { LogController } from 'fastify';
 import type { FastifyError } from 'fastify';
 import type { Logger } from 'pino';
 import type { AppConfig } from './config/schema.js';
+import {
+  createAvatarStore,
+  resolveAvatarsDir,
+  AVATAR_MAX_BYTES,
+} from './core/character/avatars.js';
 import { createCharacterRepository } from './core/character/repository.js';
 import type { CharacterRepository } from './core/character/repository.js';
 import { ExtensionRegistry } from './core/extension/index.js';
@@ -72,6 +77,20 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
   }
   app.decorate('webDist', staticHosting?.root ?? null);
 
+  /**
+   * 角色卡导入要收原始 PNG 字节。
+   *
+   * 用自建的 content-type 解析器而不是 multipart：前端只要
+   * `fetch(url, { body: file })` 就行，省一个依赖，也少一层 boundary 解析。
+   */
+  app.addContentTypeParser(
+    'image/png',
+    { parseAs: 'buffer', bodyLimit: AVATAR_MAX_BYTES },
+    (_request, body, done) => {
+      done(null, body);
+    },
+  );
+
   // 依赖通过装饰器挂载，路由与钩子直接 app.config / app.extensions 取用
   app.decorate('config', config);
   app.decorate('configSources', options.configSources ?? []);
@@ -111,6 +130,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     logger,
   });
   app.decorate('storage', storage);
+  app.decorate('avatars', createAvatarStore(resolveAvatarsDir(storage.path)));
 
   // 仓储层延迟创建：它依赖已打开的连接，而连接是在 onReady 阶段才建立的
   let characterRepo: CharacterRepository | null = null;

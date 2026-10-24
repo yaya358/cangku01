@@ -31,6 +31,8 @@ export interface CreateCharacterOptions {
 export interface CharacterRepository {
   list(options?: CharacterListOptions): CharacterList;
   getById(id: string): Character | undefined;
+  /** 头像文件名（不是 URL）；删除角色时要用它清理磁盘文件 */
+  getAvatarFile(id: string): string | null;
   create(input: CharacterInput, options?: CreateCharacterOptions): Character;
   update(id: string, patch: CharacterPatch): Character | undefined;
   setAvatar(id: string, avatarFile: string | null): Character | undefined;
@@ -58,6 +60,12 @@ export function createCharacterRepository(db: DatabaseSync): CharacterRepository
 
   return {
     getById,
+
+    getAvatarFile(id: string): string | null {
+      const row = db.prepare('SELECT avatar_file FROM characters WHERE id = ?').get(id) as
+        { avatar_file?: string | null } | undefined;
+      return row?.avatar_file ?? null;
+    },
 
     list(options: CharacterListOptions = {}): CharacterList {
       const limit = clampLimit(options.limit);
