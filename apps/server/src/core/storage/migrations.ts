@@ -45,6 +45,31 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('CREATE INDEX idx_characters_updated ON characters (updated_at DESC)');
     },
   },
+  {
+    version: 2,
+    name: 'worldbook',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE worldbook_entries (
+          id             TEXT PRIMARY KEY,
+          character_id   TEXT REFERENCES characters (id) ON DELETE CASCADE,
+          title          TEXT NOT NULL,
+          keys           TEXT NOT NULL DEFAULT '[]',
+          secondary_keys TEXT NOT NULL DEFAULT '[]',
+          content        TEXT NOT NULL DEFAULT '',
+          enabled        INTEGER NOT NULL DEFAULT 1,
+          constant       INTEGER NOT NULL DEFAULT 0,
+          case_sensitive INTEGER NOT NULL DEFAULT 0,
+          priority       INTEGER NOT NULL DEFAULT 0,
+          created_at     TEXT NOT NULL,
+          updated_at     TEXT NOT NULL
+        )
+      `);
+      // 按角色取条目是最常见的查询；character_id 为 NULL 表示全局设定
+      db.exec('CREATE INDEX idx_worldbook_character ON worldbook_entries (character_id)');
+      db.exec('CREATE INDEX idx_worldbook_priority ON worldbook_entries (priority DESC)');
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */
