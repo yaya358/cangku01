@@ -1,12 +1,14 @@
 import type { CharacterInput, CharacterList, CharacterPatch } from '@tavern/shared';
 import {
+  APP_VERSION,
   CHARACTERS_ENDPOINT,
   CHARACTER_IMPORT_ENDPOINT,
   CharacterInputSchema,
   CharacterPatchSchema,
 } from '@tavern/shared';
 import { AVATAR_MAX_BYTES } from '../../core/character/avatars.js';
-import { CardParseError, parseCardJson } from '../../core/character/card.js';
+import { CardParseError, parseCardJson, toV2Card } from '../../core/character/card.js';
+import { buildCardPng, contentDisposition, safeFileName } from '../../core/character/export.js';
 import { extractCardFromPng, PngError } from '../../core/character/png.js';
 import type { AppInstance } from '../../types/fastify.js';
 import { success } from '../envelope.js';
@@ -140,6 +142,34 @@ export function registerCharacterRoutes(app: AppInstance): void {
         .header('cache-control', 'public, max-age=300')
         .send(buffer)
     );
+  });
+
+  /** 导出为 V2 卡片 JSON：前端拿到后自己组装成下载文件。 */
+  app.get(`${CHARACTERS_ENDPOINT}/:id/export/json`, async (request) => {
+    const { id } = request.params as { id: string };
+    const character = app.characters().getById(id);
+    if (!character) throw AppError.notFound(`角色不存在: ${id}`);
+
+    return success(request.id, {
+      filename: safeFileName(character.name, '.json'),
+      card: toV2Card(character, APP_VERSION),
+    });
+  });
+
+  /** 导出为角色卡 PNG：头像 + 嵌进去的卡片数据，可直接分发或再导入。 */
+  app.get(`${CHARACTERS_ENDPOINT}/:id/export/png`, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const character = app.characters().getById(id);
+    if (!character) throw AppError.notFound(`角色不存在: ${id}`);
+
+    const avatarFile = app.characters().getAvatarFile(id);
+    const avatar = avatarFile ? (app.avatars.read(avatarFile) ?? null) : null;
+    const png = buildCardPng({ avatar, character, appVersion: APP_VERSION });
+
+    return reply
+      .header('content-type', 'image/png')
+      .header('content-disposition', contentDisposition(safeFileName(character.name, '.png')))
+      .send(png);
   });
 
   app.post(CHARACTERS_ENDPOINT, async (request) => {

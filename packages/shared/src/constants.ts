@@ -40,3 +40,13 @@ export function characterEndpoint(id: string): string {
 export function characterAvatarEndpoint(id: string): string {
   return `${characterEndpoint(id)}/avatar`;
 }
+
+/** 导出为角色卡 PNG。 */
+export function characterExportPngEndpoint(id: string): string {
+  return `${characterEndpoint(id)}/export/png`;
+}
+
+/** 导出为角色卡 JSON（V2 结构）。 */
+export function characterExportJsonEndpoint(id: string): string {
+  return `${characterEndpoint(id)}/export/json`;
+}

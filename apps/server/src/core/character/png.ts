@@ -1,4 +1,4 @@
-import { inflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 
 /**
  * PNG 文本块（tEXt / zTXt / iTXt）读写。
@@ -202,22 +202,60 @@ export function extractCardFromPng(buffer: Buffer): ExtractedCard | null {
   return null;
 }
 
-/** 构造一个 tEXt 块（导出角色卡时用）。 */
-export function buildTextChunk(keyword: string, text: string): Buffer {
-  const typeAndData = Buffer.concat([
-    Buffer.from('tEXt', 'latin1'),
-    Buffer.from(keyword, 'latin1'),
-    Buffer.from([0]),
-    Buffer.from(text, 'utf8'),
-  ]);
+/** 构造任意类型的 PNG 块（长度 + 类型 + 数据 + CRC）。 */
+export function buildChunk(type: string, data: Buffer): Buffer {
+  const typeBytes = Buffer.from(type, 'latin1');
+  const typeAndData = Buffer.concat([typeBytes, data]);
 
   const length = Buffer.alloc(4);
-  length.writeUInt32BE(typeAndData.length - 4, 0);
+  length.writeUInt32BE(data.length, 0);
 
   const crc = Buffer.alloc(4);
   crc.writeUInt32BE(crc32(typeAndData), 0);
 
   return Buffer.concat([length, typeAndData, crc]);
+}
+
+/** 构造一个 tEXt 块（导出角色卡时用）。 */
+export function buildTextChunk(keyword: string, text: string): Buffer {
+  return buildChunk(
+    'tEXt',
+    Buffer.concat([Buffer.from(keyword, 'latin1'), Buffer.from([0]), Buffer.from(text, 'utf8')]),
+  );
+}
+
+/** 从文本块数据里取出关键字（NUL 之前的部分）。 */
+function chunkKeyword(data: Buffer): string | null {
+  const end = data.indexOf(0);
+  if (end <= 0) return null;
+  return data.toString('latin1', 0, end);
+}
+
+/**
+ * 去掉若干文本块。
+ *
+ * 导出前必须调用：否则头像里原有的 chara 块还留着，我们又在后面追加新的，
+ * 再导入时解析器命中第一个（旧的），就会出现「导回去还是旧设定」的怪事。
+ */
+export function stripTextChunks(png: Buffer, keywords: readonly string[]): Buffer {
+  if (!isPng(png)) throw new PngError('NOT_PNG', '不是 PNG 文件');
+
+  const targets = new Set(keywords);
+  const parts: Buffer[] = [PNG_SIGNATURE];
+
+  for (const chunk of iterateChunks(png)) {
+    const end = chunk.offset + 12 + chunk.data.length;
+    const isText = chunk.type === 'tEXt' || chunk.type === 'zTXt' || chunk.type === 'iTXt';
+
+    if (isText) {
+      const keyword = chunkKeyword(chunk.data);
+      if (keyword && targets.has(keyword)) continue;
+    }
+
+    parts.push(png.subarray(chunk.offset, end));
+  }
+
+  return Buffer.concat(parts);
 }
 
 /** 在 IEND 之前插入若干块，得到「带头像 + 角色卡数据」的 PNG。 */
@@ -236,4 +274,75 @@ export function appendChunksBeforeEnd(png: Buffer, extraChunks: readonly Buffer[
   if (insertAt < 0) throw new PngError('TRUNCATED', 'PNG 缺少 IEND 块');
 
   return Buffer.concat([png.subarray(0, insertAt), ...extraChunks, png.subarray(insertAt)]);
+}
+
+/**
+ * 生成一张纯色占位头像。
+ *
+ * 手动创建的角色没有头像，但「导出角色卡」必须给出一张合法 PNG，
+ * 否则用户会拿到一个只有 JSON 的半成品。颜色由名字散列决定，
+ * 同一个角色每次导出的颜色一致，看起来不像随机噪音。
+ */
+export function createPlaceholderPng(seed: string, size = 256): Buffer {
+  let hash = 0;
+  for (const char of seed) {
+    hash = (hash * 31 + char.codePointAt(0)!) % 360;
+  }
+  // 深色底 + 一点琥珀色倾向，跟界面风格一致
+  const hue = hash;
+  const [red, green, blue] = hslToRgb(hue / 360, 0.32, 0.18);
+
+  const rowLength = 1 + size * 4;
+  const raw = Buffer.alloc(rowLength * size);
+  for (let y = 0; y < size; y += 1) {
+    const rowStart = y * rowLength;
+    raw[rowStart] = 0; // filter: None
+    for (let x = 0; x < size; x += 1) {
+      const offset = rowStart + 1 + x * 4;
+      raw[offset] = red;
+      raw[offset + 1] = green;
+      raw[offset + 2] = blue;
+      raw[offset + 3] = 0xff;
+    }
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    buildChunk('IHDR', ihdr),
+    buildChunk('IDAT', deflateSync(raw)),
+    buildChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/** HSL → RGB（只用于占位图，取整即可）。 */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const hue2rgb = (p: number, q: number, t: number): number => {
+    let value = t;
+    if (value < 0) value += 1;
+    if (value > 1) value -= 1;
+    if (value < 1 / 6) return p + (q - p) * 6 * value;
+    if (value < 1 / 2) return q;
+    if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
+    return p;
+  };
+
+  if (s === 0) {
+    const grey = Math.round(l * 255);
+    return [grey, grey, grey];
+  }
+
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+
+  return [
+    Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    Math.round(hue2rgb(p, q, h) * 255),
+    Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+  ];
 }

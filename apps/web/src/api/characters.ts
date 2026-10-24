@@ -1,4 +1,10 @@
-import { CHARACTERS_ENDPOINT, CHARACTER_IMPORT_ENDPOINT, characterEndpoint } from '@tavern/shared';
+import {
+  CHARACTERS_ENDPOINT,
+  CHARACTER_IMPORT_ENDPOINT,
+  characterEndpoint,
+  characterExportJsonEndpoint,
+  characterExportPngEndpoint,
+} from '@tavern/shared';
 import type { Character, CharacterInput, CharacterList, CharacterPatch } from '@tavern/shared';
 import { apiDelete, apiGet, apiPatch, apiPost, postBinary } from './client';
 
@@ -71,4 +77,19 @@ export function importCharacterFile(file: File): Promise<Character> {
     return importCharacterPng(file);
   }
   return importCharacterJson(file);
+}
+
+/** 导出为角色卡 PNG 的地址（浏览器直接下载，不必先请求再转 blob）。 */
+export function exportCardPngUrl(id: string): string {
+  return characterExportPngEndpoint(id);
+}
+
+export interface ExportedCard {
+  filename: string;
+  card: unknown;
+}
+
+/** 导出为 V2 卡片 JSON。 */
+export function exportCardJson(id: string): Promise<ExportedCard> {
+  return apiGet<ExportedCard>(characterExportJsonEndpoint(id), { timeoutMs: 15_000 });
 }

@@ -12,6 +12,9 @@
           <n-button size="small" type="primary" :loading="saving" @click="save">保存</n-button>
         </template>
 
+        <n-button size="small" :loading="exporting" @click="downloadPng">导出 PNG</n-button>
+        <n-button size="small" :loading="exporting" @click="downloadJson">导出 JSON</n-button>
+
         <n-popconfirm @positive-click="removeCharacter">
           <template #trigger>
             <n-button size="small" type="error" ghost>删除</n-button>
@@ -211,7 +214,7 @@ import type { Character, CharacterSource } from '@tavern/shared';
 import { NAlert, NButton, NInput, NPopconfirm, NSpin, NTag } from 'naive-ui';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { updateCharacter } from '@/api/characters';
+import { updateCharacter, exportCardJson, exportCardPngUrl } from '@/api/characters';
 import { useCharacterStore } from '@/stores/characters';
 import { formatDateTime } from '@/utils/format';
 
@@ -228,6 +231,7 @@ const store = useCharacterStore();
 const character = ref<Character | null>(null);
 const loading = ref(false);
 const saving = ref(false);
+const exporting = ref(false);
 const editing = ref(false);
 const error = ref<string | null>(null);
 
@@ -337,6 +341,45 @@ async function removeCharacter(): Promise<void> {
   const ok = await store.remove(current.id);
   if (ok) await router.push('/characters');
   else error.value = store.error;
+}
+
+/** 触发浏览器下载：统一用临时 <a> 点击，避免 window.open 被拦截。 */
+function triggerDownload(href: string, fileName: string): void {
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function downloadPng(): void {
+  const current = character.value;
+  if (!current) return;
+  // 后端已设 content-disposition，这里再指定一次让文件名在本地也可读
+  triggerDownload(exportCardPngUrl(current.id), `${current.name}.png`);
+}
+
+async function downloadJson(): Promise<void> {
+  const current = character.value;
+  if (!current) return;
+
+  exporting.value = true;
+  error.value = null;
+  try {
+    const data = await exportCardJson(current.id);
+    const blob = new Blob([JSON.stringify(data.card, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    triggerDownload(url, data.filename);
+    // 下载已开始，回收对象 URL，避免内存泄漏
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    exporting.value = false;
+  }
 }
 
 function clearError(): void {
