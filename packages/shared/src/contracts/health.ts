@@ -43,11 +43,21 @@ export const HealthServerSchema = z.object({
 });
 export type HealthServer = z.infer<typeof HealthServerSchema>;
 
+/** 扩展点聚合摘要：前端首页用它显示「N 个扩展已就绪」。 */
+export const HealthExtensionsSchema = z.object({
+  total: z.number().int().nonnegative(),
+  ready: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  pending: z.number().int().nonnegative(),
+});
+export type HealthExtensions = z.infer<typeof HealthExtensionsSchema>;
+
 /** 整体健康载荷：status 为 degraded 时 checks 里必然有非 ok 项。 */
 export const HealthPayloadSchema = z.object({
   status: z.enum(['ok', 'degraded']),
   app: HealthAppSchema,
   server: HealthServerSchema,
+  extensions: HealthExtensionsSchema,
   checks: z.array(HealthCheckSchema),
 });
 export type HealthPayload = z.infer<typeof HealthPayloadSchema>;
