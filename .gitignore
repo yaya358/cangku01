@@ -1,0 +1,51 @@
+# ============ 依赖 ============
+node_modules/
+.pnpm-store/
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# ============ 构建产物 ============
+dist/
+dist-ssr/
+build/
+out/
+*.local
+
+# ============ 运行时数据（不入库）============
+data/
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+uploads/
+chats/
+
+# ============ 环境变量与密钥（绝不入库）============
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# ============ 日志与缓存 ============
+*.log
+logs/
+tmp/
+.cache/
+
+# ============ 编辑器 / 系统 ============
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ 测试覆盖率 ============
+coverage/
+.nyc_output/
+.pytest_cache/
