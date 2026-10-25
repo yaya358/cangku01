@@ -44,8 +44,11 @@ function parseMembers(raw: string | null): { id: string; name: string }[] {
     const parsed: unknown = JSON.parse(raw ?? '[]');
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((item): item is { id: string; name: string } =>
-        typeof item === 'object' && item !== null && typeof (item as { id?: unknown }).id === 'string',
+      .filter(
+        (item): item is { id: string; name: string } =>
+          typeof item === 'object' &&
+          item !== null &&
+          typeof (item as { id?: unknown }).id === 'string',
       )
       .map((item) => ({ id: item.id, name: String(item.name ?? '') }));
   } catch {
@@ -101,9 +104,15 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
   `;
 
   const selectById = db.prepare(`${baseSelect} WHERE c.id = ?`);
-  const selectAll = db.prepare(`${baseSelect} ORDER BY c.updated_at DESC`);
+  /**
+   * 场景会话不进「按角色的旧对话」列表。
+   *
+   * 它属于场景，从场景页进出才对：列在这里会被当成一个角色私聊，
+   * 点进去说话会在同一条会话里另起一条链，把场景的上下文搅乱。
+   */
+  const selectAll = db.prepare(`${baseSelect} WHERE c.scene_id IS NULL ORDER BY c.updated_at DESC`);
   const selectByCharacter = db.prepare(
-    `${baseSelect} WHERE c.character_id = ? ORDER BY c.updated_at DESC`,
+    `${baseSelect} WHERE c.scene_id IS NULL AND c.character_id = ? ORDER BY c.updated_at DESC`,
   );
 
   function getById(id: string): Conversation | undefined {

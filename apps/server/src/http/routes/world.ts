@@ -1,8 +1,10 @@
-import type { ChatMessage, ChatStreamPayload } from '@tavern/shared';
+import type { ChatMessage, ChatStreamPayload, ScenePresent } from '@tavern/shared';
+import { CreateSaveSchema, WORLD_SAVES_ENDPOINT, WORLD_SCENES_ENDPOINT } from '@tavern/shared';
 import { z } from 'zod';
 import type { ServerResponse } from 'node:http';
 import { prepareConversationContext } from '../../core/context/index.js';
 import { resolveThread } from '../../core/chat/thread.js';
+import { describeReachability } from '../../core/world/repository.js';
 import type { AppInstance } from '../../types/fastify.js';
 import { resolveProvider } from '../chat-support.js';
 import { success } from '../envelope.js';
@@ -25,63 +27,110 @@ function writeEvent(raw: ServerResponse, payload: ChatStreamPayload): void {
 }
 
 export function registerWorldRoutes(app: AppInstance): void {
+  /**
+   * 在场者 + 给玩家看的那句话。
+   *
+   * 「能不能联系上」的判定只写在这里：前端拿到的就是结论，
+   * 不用自己拼「在场但忙」这种状态组合，措辞也只有一个地方要改。
+   */
+  function describePresent(sceneId: string): ScenePresent[] {
+    return app
+      .world()
+      .present(sceneId)
+      .map((entry) => {
+        const character = app.characters().getById(entry.characterId);
+        if (!character) return null;
+        const reachability = app.world().reachability(sceneId, character.id);
+        return {
+          id: character.id,
+          name: character.name,
+          busyWith: entry.busyWith,
+          reachability,
+          hint: describeReachability(reachability, character.name),
+        };
+      })
+      .filter((item): item is ScenePresent => item !== null);
+  }
+
   /** 建存档，顺带建一个默认场景（酒馆）。 */
-  app.post('/api/world/saves', async (request) => {
-    const body = parseOrThrow(
-      z.object({
-        name: z.string().min(1).max(60),
-        sceneName: z.string().min(1).max(60).default('酒馆'),
-        characterIds: z.array(z.string().min(1)).max(12).default([]),
-        player: z
-          .object({ name: z.string().max(40), role: z.string().max(200), goal: z.string().max(400) })
-          .partial()
-          .optional(),
-      }),
-      request.body,
-      '存档参数不合法',
-    );
+  app.post(WORLD_SAVES_ENDPOINT, async (request) => {
+    const body = parseOrThrow(CreateSaveSchema, request.body, '存档参数不合法');
+    const sceneName = body.sceneName ?? '酒馆';
+    const characterIds = body.characterIds ?? [];
 
     const save = app.world().createSave(body.name);
-    const scene = app.world().createScene(save.id, { name: body.sceneName, closeness: 0.35 });
-    body.characterIds.forEach((characterId, index) => {
+    const scene = app.world().createScene(save.id, { name: sceneName, closeness: 0.35 });
+    for (const characterId of characterIds) {
       const character = app.characters().getById(characterId);
-      if (!character) return;
+      if (!character) continue;
       app.world().enter(scene.id, characterId, 1, null);
-      void index;
-    });
+    }
 
     return success(request.id, { save, scene });
   });
 
   /** 列存档。 */
-  app.get('/api/world/saves', async (request) => {
+  app.get(WORLD_SAVES_ENDPOINT, async (request) => {
     return success(request.id, app.world().listSaves());
   });
 
   /** 某存档下的场景（含在场者名字，前端直接渲染头像条）。 */
-  app.get('/api/world/saves/:id/scenes', async (request) => {
+  app.get(`${WORLD_SAVES_ENDPOINT}/:id/scenes`, async (request) => {
     const { id } = request.params as { id: string };
     if (!app.world().getSave(id)) throw AppError.notFound(`存档不存在: ${id}`);
 
-    const scenes = app.world().listScenes(id).map((scene) => ({
-      ...scene,
-      present: app
-        .world()
-        .present(scene.id)
-        .map((entry) => {
-          const character = app.characters().getById(entry.characterId);
-          return character
-            ? { id: character.id, name: character.name, busyWith: entry.busyWith }
-            : null;
-        })
-        .filter((item): item is { id: string; name: string; busyWith: string | null } => !!item),
-    }));
+    const scenes = app
+      .world()
+      .listScenes(id)
+      .map((scene) => ({
+        ...scene,
+        present: describePresent(scene.id).map((person) => ({
+          id: person.id,
+          name: person.name,
+          busyWith: person.busyWith,
+        })),
+      }));
 
     return success(request.id, scenes);
   });
 
+  /**
+   * 场景详情：顶部头像条、中间消息流都要一次拿到。
+   *
+   * conversationId 为 null = 这个场景还没有人开过口；
+   * cast 是「名字对照表」，说话的人可能已经走了，名字仍然要显示得出来。
+   */
+  app.get(`${WORLD_SCENES_ENDPOINT}/:id`, async (request) => {
+    const { id } = request.params as { id: string };
+    const scene = app.world().getScene(id);
+    if (!scene) throw AppError.notFound(`场景不存在: ${id}`);
+
+    const present = describePresent(id);
+    const conversation = app.conversations().findByScene(id);
+    const messages = conversation
+      ? resolveThread(app.messages().listByConversation(conversation.id), conversation.activeLeafId)
+      : [];
+
+    const castIds = new Set(present.map((person) => person.id));
+    for (const message of messages) {
+      if (message.speakerId) castIds.add(message.speakerId);
+    }
+    const cast = [...castIds].map((characterId) => ({
+      id: characterId,
+      name: app.characters().getById(characterId)?.name ?? '某人',
+    }));
+
+    return success(request.id, {
+      scene,
+      present,
+      cast,
+      conversationId: conversation?.id ?? null,
+      messages,
+    });
+  });
+
   /** 进场 / 离场。 */
-  app.post('/api/world/scenes/:id/presence', async (request) => {
+  app.post(`${WORLD_SCENES_ENDPOINT}/:id/presence`, async (request) => {
     const { id } = request.params as { id: string };
     if (!app.world().getScene(id)) throw AppError.notFound(`场景不存在: ${id}`);
 
@@ -102,7 +151,7 @@ export function registerWorldRoutes(app: AppInstance): void {
     return success(request.id, { entered: body.characterId });
   });
 
-  app.delete('/api/world/scenes/:id/presence/:characterId', async (request) => {
+  app.delete(`${WORLD_SCENES_ENDPOINT}/:id/presence/:characterId`, async (request) => {
     const { id, characterId } = request.params as { id: string; characterId: string };
     if (!app.world().getScene(id)) throw AppError.notFound(`场景不存在: ${id}`);
     app.world().leave(id, characterId, 1);
@@ -112,11 +161,13 @@ export function registerWorldRoutes(app: AppInstance): void {
   /**
    * 场景内说一句：由在场者接话。
    *
-   * 谁先说：@ 了在场的人就他先说；否则按进场顺序轮转。
+   * 谁先说：@ 了在场的人就他先说；否则按「已经开口过的次数」轮转 ——
+   * 每轮会落两条消息（你 + 他），按消息总数取模会让同一个人一直说，
+   * 所以计数只数助手消息。
    * 消息仍然落进 conversations/messages（scene_id 指向场景），
    * 这样重说、分支、导出都还能用。
    */
-  app.post('/api/world/scenes/:id/stream', async (request, reply) => {
+  app.post(`${WORLD_SCENES_ENDPOINT}/:id/stream`, async (request, reply) => {
     const { id } = request.params as { id: string };
     const scene = app.world().getScene(id);
     if (!scene) throw AppError.notFound(`场景不存在: ${id}`);
@@ -127,7 +178,11 @@ export function registerWorldRoutes(app: AppInstance): void {
         kind: z.enum(['speak', 'act', 'think', 'narrate', 'ooc']).default('speak'),
         whisper: z.boolean().default(false),
         player: z
-          .object({ name: z.string().max(40), role: z.string().max(200), goal: z.string().max(400) })
+          .object({
+            name: z.string().max(40),
+            role: z.string().max(200),
+            goal: z.string().max(400),
+          })
           .partial()
           .optional(),
       }),
@@ -142,32 +197,36 @@ export function registerWorldRoutes(app: AppInstance): void {
       .map((entry) => app.characters().getById(entry.characterId))
       .filter((item): item is NonNullable<typeof item> => !!item);
 
-    const speaker =
-      members.find((member) => body.content.includes(`@${member.name}`)) ??
-      members[app.messages().count(id) % members.length] ??
-      members[0];
+    if (members.length === 0) throw AppError.validation('这个场景里现在没有人');
 
-    if (!speaker) throw AppError.validation('这个场景里现在没有人');
-
-    // 场景 ↔ 会话：一个场景复用一条会话（第一次用时创建）
+    // 场景 ↔ 会话：一个场景复用一条会话（第一次开口时创建）
     const conversation =
       app.conversations().findByScene(id) ??
       app.conversations().create({
-        characterId: speaker.id,
+        characterId: members[0]!.id,
         title: scene.name,
         ...(body.player ? { player: body.player } : {}),
         sceneId: id,
       });
 
     const all = app.messages().listByConversation(conversation.id);
+    const spokenTurns = all.filter((message) => message.role === 'assistant').length;
+
+    const speaker =
+      members.find((member) => body.content.includes(`@${member.name}`)) ??
+      members[spokenTurns % members.length] ??
+      members[0]!;
+
     const history: ChatMessage[] = resolveThread(all, conversation.activeLeafId)
       .filter((message) => message.role !== 'system')
       .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
 
+    // 接在当前叶子后面：不接的话每轮都会各自成一条根链，翻看时只剩最后一句
     const userMessage = app.messages().append(conversation.id, {
       role: 'user',
       content: body.content,
       kind: body.kind,
+      ...(conversation.activeLeafId ? { parentId: conversation.activeLeafId } : {}),
     });
 
     const prepared = prepareConversationContext({

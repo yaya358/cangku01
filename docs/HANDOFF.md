@@ -8,7 +8,7 @@
 本地 AI 角色扮演酒馆：Vue3 前端 + Fastify/SQLite 后端，pnpm monorepo。
 仓库 `C:\Users\jingy\Desktop\vork01`，远端 `github.com/yaya358/cangku01`（main）。
 
-**当前状态**：52 个提交 / 278 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
+**当前状态**：54 个提交 / 289 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
 
 ```bash
 pnpm install && pnpm dev     # 后端 8787 + 前端 5173
@@ -30,22 +30,25 @@ pnpm -r run typecheck && pnpm lint
 | 步 | 内容 | 状态 |
 |---|---|---|
 | 1 | 场景对话接口（在场者接话） | ✅ 已完成（`routes/world.ts`） |
-| 2 | 前端场景视图 | ⬜ **接下来做这个** |
-| 3 | 私聊场景 + 低声 + 偷听 | ⬜ |
+| 2 | 前端场景视图 | ✅ 已完成（`views/SceneView.vue` + `GET /api/world/scenes/:id`） |
+| 3 | 私聊场景 + 低声 + 偷听 | ⬜ **接下来做这个** |
 | 4 | 好感度打分 + 阈值解锁 | ⬜ |
 | 5 | 主线章节 + 情报本侧栏 | ⬜ |
 | 6 | 旧会话迁移成私密场景 | ⬜ |
 
-### 第 2 步：前端场景视图
+### 第 2 步：前端场景视图（已完成，要点留着备查）
 
-- 需要一条 `GET /api/world/scenes/:id`：返回 `{ scene, present:[{id,name,busyWith}], conversationId, messages }`
-  （场景 → 会话靠 `conversations.scene_id`，仓储已有 `findByScene`）
-- 新页面 `apps/web/src/views/SceneView.vue`，路由 `/scenes/:id`
-- 顶部：在场者头像条（含"在忙什么"），点击可提示可达性文案（`describeReachability` 的四种状态）
-- 中部：消息流，助手气泡上方显示发言人名字（参考 `ChatView.vue` 的 `bubble__speaker`）
-- 底部：沿用五种输入方式 + 发送到 `POST /api/world/scenes/:id/stream`
-- 入口：`ConversationsView` 的「开酒馆大厅」改成「进入酒馆」（跳场景），旧大厅入口可保留但标为兼容
-- 验收：打开场景能看到在场者、能说话、谁接话符合「@ 优先 / 否则轮转」
+- `GET /api/world/scenes/:id` → `{ scene, present, cast, conversationId, messages }`；
+  `present` 里带 `reachability` 与 `hint`（文案在 `describeReachability`，前端不重复写）
+- 新页面 `apps/web/src/views/SceneView.vue`（路由 `/scenes/:id`）、状态在 `stores/scene.ts`、
+  接口在 `api/world.ts`
+- 顶部头像条显示在场者与「在忙什么」，点一下给出可达性文案；助手气泡上方显示发言人名字
+- 底部五种输入方式仍在，发送走 `POST /api/world/scenes/:id/stream`
+- 顺手修了两个第 1 步的 bug：
+  1. 轮转取模用成「消息总数」（每轮两条，等于永远同一个人）→ 改成数助手消息（已开口的次数）
+  2. 每轮的 user 消息没接 `parentId` → 每轮各自成根，翻看时只剩最后一轮
+- 场景会话**不进** `/api/conversations` 列表（`scene_id IS NOT NULL` 的过滤）：
+  它属于场景，列到旧对话里会被当成角色私聊，点进去说话会搅乱场景上下文
 
 ### 第 3 步：私聊 + 低声 + 偷听
 
@@ -82,6 +85,12 @@ pnpm -r run typecheck && pnpm lint
 8. **迁移只能用 `ALTER TABLE ADD COLUMN` 或建新表**；已有 11 版，`LATEST_VERSION` 自动推导。
 9. **本机验证**：真实模型是 `deepseek-flash`，一轮约 1.3-2 秒、150-250 token；别写会跑几十轮的验证脚本。
 10. **提交前必须**：`pnpm -r run typecheck` + `pnpm lint` + 后端测试全绿；commit 用中文正文，说明"为什么"。
+11. **改了 `packages/shared` 必须先 `pnpm --filter @tavern/shared run build`** —— 前后端从 `dist` 读类型，
+    不 build 就是拿旧契约做 typecheck，白忙一场。
+12. **临时脚本别放仓库里**：eslint 不忽略 `tmp/`，Chrome profile 之类一放进去 lint 直接爆几千条。
+    放 `%TEMP%` 下跑。
+13. **本机端口上的旧后端可能是「不带 watch」起的**（`node --import tsx src/index.ts`），
+    改完代码它不会自己重启 —— 新接口 404 先怀疑这个，杀掉重起 `pnpm dev:server`。
 
 ## 五、风格约束
 

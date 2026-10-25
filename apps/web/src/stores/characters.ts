@@ -1,7 +1,6 @@
 import type { Character, CharacterInput, CharacterList, CharacterSummary } from '@tavern/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { ApiError } from '@/api/client';
 import {
   createCharacter,
   deleteCharacter,
@@ -10,6 +9,7 @@ import {
   importCharacterFile,
   seedSampleCharacters,
 } from '@/api/characters';
+import { describeError } from '@/utils/errors';
 
 /** 搜索输入到请求之间的防抖时间。 */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -34,14 +34,6 @@ export const useCharacterStore = defineStore('characters', () => {
 
   const isEmpty = computed(() => !loading.value && items.value.length === 0);
   const hasSearch = computed(() => search.value.trim().length > 0);
-
-  function describeError(cause: unknown): string {
-    if (cause instanceof ApiError) {
-      if (cause.isNetworkError) return '连不上后端，请确认服务已启动';
-      return cause.message;
-    }
-    return cause instanceof Error ? cause.message : String(cause);
-  }
 
   async function refresh(): Promise<void> {
     loading.value = true;

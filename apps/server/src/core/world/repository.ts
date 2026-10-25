@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import type { Reachability, Scene, Save } from '@tavern/shared';
 
 /**
  * 世界存档域：存档 → 场景 → 在场者。
@@ -7,32 +8,15 @@ import type { DatabaseSync } from 'node:sqlite';
  * 设计意图写在 docs/design-world.md，这里只放「数据的形状」与最关键的判定：
  * **这个人现在能不能联系上**。
  *
+ * 数据形状本身定义在 @tavern/shared（前端也要用同一份），
+ * 这里只负责读写与判定，不重复声明一遍字段。
+ *
  * 可达性规则（世界不再退化成通讯录的关键）：
  *   在场且不忙   → 可以直接说话
  *   在场但在忙   → 未必有空
  *   已经离开     → 联系不上，只能等下次遇见
  *   不在该场景   → 列表里根本不该出现
  */
-
-export interface WorldSave {
-  id: string;
-  name: string;
-  chapter: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Scene {
-  id: string;
-  saveId: string;
-  name: string;
-  /** public = 公开场所（可能有人在场/偷听）；private = 私聊 */
-  kind: 'public' | 'private';
-  /** 0-1，越大越安静（越容易被偷听） */
-  closeness: number;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface PresenceEntry {
   characterId: string;
@@ -44,8 +28,9 @@ export interface PresenceEntry {
   busyWith: string | null;
 }
 
-/** 能不能联系上他。 */
-export type Reachability = 'available' | 'busy' | 'left' | 'absent';
+/** 存档沿用 shared 的类型；旧名字保留，避免改动面过大。 */
+export type WorldSave = Save;
+export type { Reachability, Scene };
 
 export interface WorldRepository {
   createSave: (name: string) => WorldSave;
@@ -143,8 +128,7 @@ export function createWorldRepository(db: DatabaseSync): WorldRepository {
 
     getSave(id: string): WorldSave | undefined {
       const row = db.prepare('SELECT * FROM saves WHERE id = ?').get(id) as unknown as
-        | SaveRow
-        | undefined;
+        SaveRow | undefined;
       return row ? toSave(row) : undefined;
     },
 
@@ -176,8 +160,7 @@ export function createWorldRepository(db: DatabaseSync): WorldRepository {
 
     getScene(id: string): Scene | undefined {
       const row = db.prepare('SELECT * FROM scenes WHERE id = ?').get(id) as unknown as
-        | SceneRow
-        | undefined;
+        SceneRow | undefined;
       return row ? toScene(row) : undefined;
     },
 
@@ -199,9 +182,11 @@ export function createWorldRepository(db: DatabaseSync): WorldRepository {
     },
 
     leave(sceneId, characterId, turn): void {
-      db.prepare(
-        'UPDATE presence SET left_turn = ? WHERE scene_id = ? AND character_id = ?',
-      ).run(turn, sceneId, characterId);
+      db.prepare('UPDATE presence SET left_turn = ? WHERE scene_id = ? AND character_id = ?').run(
+        turn,
+        sceneId,
+        characterId,
+      );
     },
 
     present(sceneId: string): PresenceEntry[] {

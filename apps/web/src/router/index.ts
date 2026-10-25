@@ -41,6 +41,13 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '对话' },
   },
   {
+    // 世界模式：说话的地方是场景，不是某个角色
+    path: '/scenes/:id',
+    name: 'scene',
+    component: () => import('@/views/SceneView.vue'),
+    meta: { title: '场景' },
+  },
+  {
     path: '/playground',
     name: 'playground',
     // 懒加载：试话页只有真要用时才下载，首屏不为它买单

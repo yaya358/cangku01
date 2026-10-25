@@ -8,7 +8,6 @@ import type {
 } from '@tavern/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { ApiError } from '@/api/client';
 import {
   createConversation,
   deleteConversation,
@@ -20,6 +19,7 @@ import {
   switchBranch as switchBranchApi,
   updatePlayer as updatePlayerApi,
 } from '@/api/conversations';
+import { describeError } from '@/utils/errors';
 
 /** 渲染用的消息：库里来的 + 正在流式生成的那条。 */
 export interface ChatBubble {
@@ -68,14 +68,6 @@ export const useChatStore = defineStore('chat', () => {
   const title = computed(() => conversation.value?.title ?? '对话');
   const characterId = computed(() => conversation.value?.characterId ?? null);
   const isEmpty = computed(() => messages.value.length === 0);
-
-  function describeError(cause: unknown): string {
-    if (cause instanceof ApiError) {
-      return cause.isNetworkError ? '连不上后端，请确认服务已启动' : cause.message;
-    }
-    if (cause instanceof DOMException && cause.name === 'AbortError') return '已停止生成';
-    return cause instanceof Error ? cause.message : String(cause);
-  }
 
   function toBubble(message: Message): ChatBubble {
     return {

@@ -6,12 +6,20 @@
         <p class="conv__sub">
           挑一个人接着说，或者开一段新的。每段对话的记录都在库里，关掉页面也不会丢。
         </p>
+        <p class="conv__sub conv__sub--dim">
+          「进入酒馆」走世界模式：说话的地方是一个场景，能接话的是此刻在场的人 ——
+          人来人往，不在场的人不会突然回你。下面这些是按角色开的旧对话，仍然能接着聊。
+        </p>
       </div>
       <div class="conv__actions">
-        <n-button size="small" @click="hallOpen = true">开酒馆大厅</n-button>
+        <n-button size="small" :loading="entering" @click="enterTavern">进入酒馆</n-button>
         <n-button type="primary" size="small" @click="pickerOpen = true">新对话</n-button>
       </div>
     </header>
+
+    <n-alert v-if="enterError" type="error" :title="enterError" closable @close="enterError = null">
+      <p class="conv__hint">进不去不影响旧对话 —— 你可以先用下面的列表接着聊。</p>
+    </n-alert>
 
     <n-input
       v-model:value="keyword"
@@ -20,6 +28,12 @@
       clearable
       class="conv__search"
     />
+
+    <p class="conv__legacy">
+      老入口还在：
+      <button class="conv__legacy-btn" type="button" @click="hallOpen = true">旧版酒馆大厅</button>
+      —— 挑几个人同场轮流接话，等价于「进一个场景」，保留是为了兼容旧记录。
+    </p>
 
     <div v-if="loading" class="conv__loading">
       <n-spin size="small" />
@@ -101,16 +115,17 @@
       </ul>
     </n-modal>
 
-    <!-- 酒馆大厅：挑几个角色同时在场 -->
+    <!-- 酒馆大厅：挑几个角色同时在场（旧入口，世界模式请用「进入酒馆」） -->
     <n-modal
       v-model:show="hallOpen"
       preset="card"
-      title="酒馆大厅"
+      title="旧版酒馆大厅"
       :style="{ width: '560px', maxWidth: '92vw' }"
       :bordered="false"
     >
       <p class="conv__hint">
         选几个角色一起在场。他们按轮次轮流接话，你还可以用 @名字 指定谁先说。
+        这条老入口没有「在场/离开」，新剧情请用「进入酒馆」。
       </p>
 
       <ul class="picker">
@@ -156,11 +171,13 @@
 <script setup lang="ts">
 import type { CharacterSummary, Conversation, Player } from '@tavern/shared';
 import { characterAvatarEndpoint } from '@tavern/shared';
-import { NButton, NInput, NModal, NSpin } from 'naive-ui';
+import { NAlert, NButton, NInput, NModal, NSpin } from 'naive-ui';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { fetchCharacters } from '@/api/characters';
+import { ensureDefaultScene } from '@/api/world';
 import { useChatStore } from '@/stores/chat';
+import { describeError } from '@/utils/errors';
 import PlayerIdentityModal from '@/components/PlayerIdentityModal.vue';
 
 const router = useRouter();
@@ -181,6 +198,9 @@ const identityOpen = ref(false);
 const starting = ref(false);
 /** 选中但要等身份确认的角色 */
 const pending = ref<CharacterSummary | null>(null);
+/** 进入酒馆：正在找/建场景 */
+const entering = ref(false);
+const enterError = ref<string | null>(null);
 
 function avatarOf(characterId: string): string {
   return characterAvatarEndpoint(characterId);
@@ -245,6 +265,30 @@ function startWith(character: CharacterSummary): void {
   pending.value = character;
   pickerOpen.value = false;
   identityOpen.value = true;
+}
+
+/**
+ * 进入酒馆：世界模式的入口。
+ *
+ * 第一次点进来可能什么都还没有 —— 那就当场建一个存档（顺手把几个角色放进去），
+ * 而不是把人推到一个「没有场景」的死胡同里。
+ */
+async function enterTavern(): Promise<void> {
+  if (entering.value) return;
+  entering.value = true;
+  enterError.value = null;
+  try {
+    const sceneId = await ensureDefaultScene();
+    if (!sceneId) {
+      enterError.value = '还没有可以进的场景：先去角色页放几个人进来，再点一次。';
+      return;
+    }
+    await router.push(`/scenes/${sceneId}`);
+  } catch (cause) {
+    enterError.value = describeError(cause);
+  } finally {
+    entering.value = false;
+  }
 }
 
 /** 打开大厅：先勾人，再定身份 */
@@ -524,6 +568,32 @@ onMounted(() => {
   color: var(--text-faint);
   font-size: 11.5px;
   line-height: 1.7;
+}
+
+/* 世界模式入口的说明：比正文弱一档，别抢标题 */
+.conv__sub--dim {
+  color: var(--text-faint);
+  opacity: 0.85;
+}
+
+.conv__legacy {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.conv__legacy-btn {
+  padding: 1px 6px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.conv__legacy-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--accent);
 }
 
 .picker__item--check {

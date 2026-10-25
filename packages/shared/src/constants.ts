@@ -101,6 +101,41 @@ export function messageRegenerateEndpoint(id: string): string {
   return `${messageEndpoint(id)}/regenerate`;
 }
 
+/**
+ * 世界模式：存档 → 场景 → 在场者。
+ *
+ * 场景是新的「说话的地方」，所以流式接口挂在场景下，而不是挂到某个角色上。
+ */
+export const WORLD_SAVES_ENDPOINT = `${API_PREFIX}/world/saves`;
+
+/** 某存档下的场景集合。 */
+export function worldSaveScenesEndpoint(saveId: string): string {
+  return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}/scenes`;
+}
+
+/** 场景集合（详情、进场都要用）。 */
+export const WORLD_SCENES_ENDPOINT = `${API_PREFIX}/world/scenes`;
+
+/** 单个场景（详情：在场者 + 消息）。 */
+export function worldSceneEndpoint(id: string): string {
+  return `${WORLD_SCENES_ENDPOINT}/${encodeURIComponent(id)}`;
+}
+
+/** 场景内说一句并流式生成（SSE）。 */
+export function worldSceneStreamEndpoint(id: string): string {
+  return `${worldSceneEndpoint(id)}/stream`;
+}
+
+/** 场景的在场者集合（进场）。 */
+export function worldScenePresenceEndpoint(id: string): string {
+  return `${worldSceneEndpoint(id)}/presence`;
+}
+
+/** 某个人的在场记录（离场）。 */
+export function worldScenePresenceMemberEndpoint(id: string, characterId: string): string {
+  return `${worldScenePresenceEndpoint(id)}/${encodeURIComponent(characterId)}`;
+}
+
 /** 世界书条目集合。 */
 export const WORLDBOOK_ENDPOINT = `${API_PREFIX}/worldbook`;
 
