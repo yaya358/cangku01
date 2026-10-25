@@ -884,6 +884,77 @@ describe('存档：新建 / 载入 / 重新开始 / 删除', () => {
   });
 });
 
+describe('世界包：换题材', () => {
+  it('按题材建存档：场景名、在场的人、三章谜题都跟着变', async () => {
+    await withApp(async ({ app }) => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/world/saves',
+        payload: { name: '雾岭村', theme: 'village-wedding' },
+      });
+      expect(created.statusCode).toBe(200);
+      const { save, scene } = created.json().data;
+
+      expect(save.theme).toBe('village-wedding');
+      expect(scene.name).toBe('喜堂');
+
+      // 包里的四个人都进了喜堂
+      const detail = await sceneDetail(app, scene.id);
+      expect(detail.present.map((person: { name: string }) => person.name).sort()).toEqual(
+        ['喜婆', '陈先生', '老槐', '阿绣'].sort(),
+      );
+
+      // 主线问的是这个题材的谜题，不是月灯镇的
+      const journal = (
+        await app.inject({ method: 'GET', url: `/api/world/saves/${save.id}/journal` })
+      ).json().data;
+      expect(journal.quest.title).toContain('红烛');
+      expect(journal.quest.question).toContain('新娘');
+      expect(journal.quests.map((quest: { question: string }) => quest.question)).toEqual([
+        '新娘到底是谁？',
+        '井里捞上来的是什么？',
+        '谁在替死人办这场喜事？',
+      ]);
+    });
+  });
+
+  it('同一题材开两个存档，不会把角色建两遍', async () => {
+    await withApp(async ({ app }) => {
+      const first = await app.inject({
+        method: 'POST',
+        url: '/api/world/saves',
+        payload: { name: '灰塔一', theme: 'magic-academy' },
+      });
+      const second = await app.inject({
+        method: 'POST',
+        url: '/api/world/saves',
+        payload: { name: '灰塔二', theme: 'magic-academy' },
+      });
+      expect(first.statusCode).toBe(200);
+      expect(second.statusCode).toBe(200);
+
+      const list = await app.inject({ method: 'GET', url: '/api/characters?limit=100' });
+      const names = list.json().data.items.map((item: { name: string }) => item.name);
+      expect(names.filter((name: string) => name === '薇拉')).toHaveLength(1);
+      expect(names.filter((name: string) => name === '老穆')).toHaveLength(1);
+    });
+  });
+
+  it('不带题材还是月灯镇那套（老调用方不受影响）', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/world/saves',
+        payload: { name: '月灯镇', sceneName: '月灯酒馆', characterIds: [boss] },
+      });
+      const { save, scene } = created.json().data;
+      expect(save.theme).toBe('moonlight');
+      expect(scene.name).toBe('月灯酒馆');
+    });
+  });
+});
+
 describe('好感度', () => {
   it('每轮结束打一次分，并把变化写进库', async () => {
     await withApp(async ({ app, scoreCalls }) => {

@@ -20,3 +20,6 @@ export * from './contracts/journal.js';
 // 内置示例角色（前后端共用：后端首次启动自动播种，前端用来展示说明）
 export * from './samples/cards.js';
 export * from './samples/avatars.js';
+
+// 世界包：题材（场景 / 角色 / 三章谜题）—— 切换主题只换一个 id
+export * from './samples/themes.js';

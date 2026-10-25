@@ -5,7 +5,13 @@ import type {
   Message,
   ScenePresent,
 } from '@tavern/shared';
-import { CreateSaveSchema, WORLD_SAVES_ENDPOINT, WORLD_SCENES_ENDPOINT } from '@tavern/shared';
+import {
+  CreateSaveSchema,
+  DEFAULT_THEME_ID,
+  themeById,
+  WORLD_SAVES_ENDPOINT,
+  WORLD_SCENES_ENDPOINT,
+} from '@tavern/shared';
 import { affinityMood } from '@tavern/shared';
 import { z } from 'zod';
 import type { ServerResponse } from 'node:http';
@@ -147,12 +153,53 @@ export function registerWorldRoutes(app: AppInstance): void {
   /** 建存档，顺带建一个默认场景（酒馆）。 */
   app.post(WORLD_SAVES_ENDPOINT, async (request) => {
     const body = parseOrThrow(CreateSaveSchema, request.body, '存档参数不合法');
-    const sceneName = body.sceneName ?? '酒馆';
-    const characterIds = body.characterIds ?? [];
+    const theme = themeById(body.theme ?? DEFAULT_THEME_ID);
 
-    const save = app.world().createSave(body.name);
-    const scene = app.world().createScene(save.id, { name: sceneName, closeness: 0.35 });
-    for (const characterId of characterIds) {
+    const save = app.world().createSave(body.name, theme.id);
+    const scene = app.world().createScene(save.id, {
+      name: body.sceneName ?? theme.sceneName,
+      closeness: theme.closeness,
+    });
+
+    /**
+     * 带 theme = 走世界包：场景名、在场的人、三章谜题都从包里取。
+     * 包里的人按名字找，缺的现建一个 —— 同一题材开第二个存档不会把人建两遍。
+     */
+    if (body.theme) {
+      const known = new Map(
+        app
+          .characters()
+          .list({ limit: 500 })
+          .items.map((item) => [item.name, item.id]),
+      );
+
+      for (const member of theme.cast) {
+        let characterId = known.get(member.name);
+        if (!characterId) {
+          characterId = app.characters().create({
+            name: member.name,
+            description: member.excerpt,
+            personality: member.personality,
+            scenario: member.scenario,
+            firstMes: member.firstMes,
+            mesExample: '',
+            systemPrompt: '',
+            postHistoryInstructions: '',
+            creatorNotes: '',
+            secret: member.secret,
+            goal: member.goal,
+            tags: member.tags,
+            alternateGreetings: [],
+          }).id;
+          known.set(member.name, characterId);
+        }
+        app.world().enter(scene.id, characterId, 1, null);
+      }
+
+      return success(request.id, { save, scene });
+    }
+
+    for (const characterId of body.characterIds ?? []) {
       const character = app.characters().getById(characterId);
       if (!character) continue;
       app.world().enter(scene.id, characterId, 1, null);
@@ -280,11 +327,12 @@ export function registerWorldRoutes(app: AppInstance): void {
    */
   app.get(`${WORLD_SAVES_ENDPOINT}/:id/journal`, async (request) => {
     const { id } = request.params as { id: string };
-    if (!app.world().getSave(id)) throw AppError.notFound(`存档不存在: ${id}`);
+    const save = app.world().getSave(id);
+    if (!save) throw AppError.notFound(`存档不存在: ${id}`);
 
     const journal = app.journal();
-    // 按在场的人现编主线：一章指着一个人，玩家才知道该去找谁
-    journal.ensureMainline(id, castOf(id));
+    // 按在场的人现编主线：一章指着一个人，玩家才知道该去找谁；谜面按题材来
+    journal.ensureMainline(id, castOf(id), save.theme);
 
     return success(request.id, {
       saveId: id,
@@ -817,7 +865,9 @@ export function registerWorldRoutes(app: AppInstance): void {
      * 可能这一轮才凑齐，漏查一次玩家就得多说一句废话。
      */
     // 先把主线补上：没打开过侧栏的存档也得能推进
-    app.journal().ensureMainline(scene.saveId, castOf(scene.saveId));
+    app
+      .journal()
+      .ensureMainline(scene.saveId, castOf(scene.saveId), app.world().getSave(scene.saveId)?.theme);
     const advancedChapter = app.journal().advance(scene.saveId, questValues(scene.saveId));
     if (advancedChapter.advanced) {
       writeEvent(raw, {

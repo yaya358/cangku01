@@ -20,6 +20,8 @@ export const SaveSchema = z.object({
   name: z.string(),
   /** 第几章；主线推进时加一 */
   chapter: z.number().int().nonnegative(),
+  /** 世界包 id（题材）：主线谜题、开场场景、在场的人都从它取 */
+  theme: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -129,6 +131,11 @@ export const CreateSaveSchema = z.object({
   name: z.string().min(1).max(60),
   sceneName: z.string().min(1).max(60).optional(),
   characterIds: z.array(z.string().min(1)).max(12).optional(),
+  /**
+   * 世界包 id：带上它就按这个题材建（场景名、在场的人、三章谜题都从包里取），
+   * 不带就是默认的月灯镇。
+   */
+  theme: z.string().min(1).max(40).optional(),
   player: z
     .object({
       name: z.string().max(40),

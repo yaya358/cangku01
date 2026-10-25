@@ -44,7 +44,7 @@ export interface CreateSceneInput {
 }
 
 export interface WorldRepository {
-  createSave: (name: string) => WorldSave;
+  createSave: (name: string, theme?: string) => WorldSave;
   getSave: (id: string) => WorldSave | undefined;
   listSaves: () => WorldSave[];
 
@@ -77,6 +77,7 @@ interface SaveRow {
   id: string;
   name: string;
   chapter: number;
+  theme: string;
   created_at: string;
   updated_at: string;
 }
@@ -105,6 +106,7 @@ function toSave(row: SaveRow): WorldSave {
     id: row.id,
     name: row.name,
     chapter: row.chapter,
+    theme: row.theme ?? 'moonlight',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -137,12 +139,12 @@ export function createWorldRepository(db: DatabaseSync): WorldRepository {
   const now = (): string => new Date().toISOString();
 
   return {
-    createSave(name: string): WorldSave {
+    createSave(name: string, theme = 'moonlight'): WorldSave {
       const id = randomUUID();
       const at = now();
       db.prepare(
-        'INSERT INTO saves (id, name, chapter, created_at, updated_at) VALUES (?, ?, 1, ?, ?)',
-      ).run(id, name.trim() || '新的世界', at, at);
+        'INSERT INTO saves (id, name, chapter, theme, created_at, updated_at) VALUES (?, ?, 1, ?, ?, ?)',
+      ).run(id, name.trim() || '新的世界', theme, at, at);
       const row = db.prepare('SELECT * FROM saves WHERE id = ?').get(id) as unknown as SaveRow;
       return toSave(row);
     },

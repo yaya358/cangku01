@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { Clue, Quest, QuestProgress } from '@tavern/shared';
+import type { Clue, Quest, QuestProgress, ThemeMystery } from '@tavern/shared';
+import { mysteriesFor } from '@tavern/shared';
 
 /**
  * 主线与情报本的仓储。
@@ -64,30 +65,28 @@ interface QuestTemplate {
  * 主线得先是一件事，才谈得上推进：每一章都有一个**具体的问题**要问出来，
  * 问的对象是这一章指着的那个角色。标题用谜面而不是「让某人开口」——
  * 后者像任务清单，前者才像故事。
+ *
+ * 谜面本身按题材来（`mysteriesFor(theme)`）：月灯镇问的是通缉令，
+ * 雾岭村问的是新娘，长夜号问的是航线。换题材不该改这里，只该换存档的 theme。
  */
-const MYSTERIES = [
-  { title: '第一章 · 那晚的动静', question: '那晚到底发生了什么？' },
-  { title: '第二章 · 那张通缉令', question: '通缉令上写的是谁？' },
-  { title: '第三章 · 名单的最后一笔', question: '名单最后一个名字是谁？' },
-] as const;
 
 /**
  * 按在场的人现编一条主线：一章一个谜面、一章指着一个角色。
  *
- * 谜面是固定的三条（这个世界本来就围着「那晚 / 通缉令 / 名单」转），
- * 指到谁身上则按进场顺序来，并且**跳过已经给过你情报的人** ——
+ * 指到谁身上按进场顺序来，并且**跳过已经给过你情报的人** ——
  * 一个角色只会松口一次，把已经松过口的人指成新的焦点，这一章就永远过不去。
  */
 export function mainlineFor(
   cast: readonly CastMember[],
   usedNames: ReadonlySet<string> = new Set(),
+  mysteries: readonly ThemeMystery[] = mysteriesFor(undefined),
 ): QuestTemplate[] {
   if (cast.length === 0) {
     return [
       {
         chapter: 1,
         title: '第一章 · 先找个人说话',
-        question: '这个小镇里还有谁愿意跟你说话？',
+        question: '这个地方还有谁愿意跟你说话？',
         goal: '场景里得先有人 —— 进去说一句，才会有人接',
         requiredClues: 1,
         requiredAffinity: 0,
@@ -100,7 +99,7 @@ export function mainlineFor(
   const fresh = cast.filter((person) => !usedNames.has(person.name));
   const pool = fresh.length > 0 ? fresh : [...cast];
 
-  return MYSTERIES.slice(0, Math.min(3, cast.length)).map((mystery, index) => {
+  return mysteries.slice(0, Math.min(3, cast.length)).map((mystery, index) => {
     const person = pool[index % pool.length]!;
     return {
       chapter: index + 1,
@@ -162,7 +161,7 @@ export interface QuestValues {
 
 export interface JournalRepository {
   /** 按在场的人现编一条主线（已经有一章就什么都不做，幂等） */
-  ensureMainline: (saveId: string, cast: readonly CastMember[]) => void;
+  ensureMainline: (saveId: string, cast: readonly CastMember[], theme?: string) => void;
   listQuests: (saveId: string) => Quest[];
   /** 当前进行中的那一章（全部演完为 undefined） */
   activeQuest: (saveId: string) => Quest | undefined;
@@ -288,7 +287,7 @@ export function createJournalRepository(
   }
 
   return {
-    ensureMainline(saveId: string, cast: readonly CastMember[]): void {
+    ensureMainline(saveId: string, cast: readonly CastMember[], theme?: string): void {
       /**
        * 补齐缺的章节，而不是「有一章就什么都不做」。
        *
@@ -309,7 +308,7 @@ export function createJournalRepository(
             );
       const existing = new Set(quests.map((quest) => quest.chapter));
 
-      for (const template of mainlineFor(cast, used)) {
+      for (const template of mainlineFor(cast, used, mysteriesFor(theme))) {
         if (existing.has(template.chapter)) continue;
         insertQuest(saveId, template);
       }

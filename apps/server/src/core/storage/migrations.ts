@@ -653,6 +653,19 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     },
   },
+  {
+    version: 19,
+    name: 'save-theme',
+    up: (db) => {
+      /**
+       * 存档带题材。
+       *
+       * 主线谜题、开场场景、在场的人现在都从「世界包」里取，
+       * 老存档没有这个概念 —— 默认回落到月灯镇（它们本来就是月灯镇）。
+       */
+      db.exec("ALTER TABLE saves ADD COLUMN theme TEXT NOT NULL DEFAULT 'moonlight'");
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */
