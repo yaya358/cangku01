@@ -22,6 +22,8 @@ export type LayerKind =
   | 'motive'
   /** 玩家身份：你是谁、你图什么 —— 决定角色怎么对你说话 */
   | 'user_persona'
+  /** 剧本事件：这一轮到点了，发生了什么事 */
+  | 'event'
   | 'worldbook'
   | 'summary'
   | 'history'
@@ -112,6 +114,13 @@ export interface AssembleInput {
   };
   /** 世界书命中条目（阶段 4 第三个提交接入） */
   worldbook?: readonly { id: string; title: string; content: string; keywords?: string[] }[];
+  /**
+   * 本轮触发的剧本事件。
+   *
+   * 与世界书的区别：世界书是「提到才注入的设定」，事件是「到点就发生的事」——
+   * 前者是背景，后者是剧情推进。
+   */
+  events?: readonly { id: string; title: string; content: string; turn?: number }[];
   /** 滚动摘要（阶段 6 接入） */
   summary?: string;
   /** 预算参数 */

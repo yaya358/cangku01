@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { prepareConversationContext } from '../../core/context/index.js';
 import { resolveThread, summarizeBranches } from '../../core/chat/thread.js';
+import { pickEventsToFire, toEventLayers } from '../../core/script/index.js';
 import type { ProviderAdapter } from '../../core/provider/index.js';
 import type { AppInstance } from '../../types/fastify.js';
 import { resolveProvider } from '../chat-support.js';
@@ -219,6 +220,21 @@ export function registerConversationRoutes(app: AppInstance): void {
       ...(parentId ? { parentId } : {}),
     });
 
+    /**
+     * 剧本事件：这一轮是否到点了。
+     *
+     * 「第 N 轮」= 玩家第 N 次发言（含刚写的这句）。
+     * 已经触发过的记在 conversation_events 里，同一轮不会重复发生。
+     */
+    const turn = history.filter((message) => message.role === 'user').length + 1;
+    const scriptRepo = app.scriptEvents();
+    const firedEvents = pickEventsToFire({
+      events: scriptRepo.listByCharacter(character.id),
+      fired: scriptRepo.firedIds(id),
+      turn,
+    });
+    for (const event of firedEvents) scriptRepo.markFired(id, event.id);
+
     const prepared = prepareConversationContext({
       character,
       entries: app.worldbook().listForCharacter(character.id),
@@ -226,6 +242,7 @@ export function registerConversationRoutes(app: AppInstance): void {
       userName: body.userName ?? conversation.player.name,
       // 这一轮你是谁来、图什么 —— 决定角色会戒备、讨好还是试探
       player: conversation.player,
+      ...(firedEvents.length > 0 ? { events: toEventLayers(firedEvents) } : {}),
     });
 
     const controller = new AbortController();
@@ -248,6 +265,13 @@ export function registerConversationRoutes(app: AppInstance): void {
         contextTokens: prepared.budget.used,
         worldbookHits: prepared.worldbook.hits.length,
       },
+      // 事件提示要在正文之前发给前端，玩家才知道「这一轮为什么变了」
+      notices: firedEvents.map((event) => ({
+        eventId: event.id,
+        title: event.title,
+        content: event.content,
+        atTurn: event.atTurn,
+      })),
       onError: (error) => {
         request.log.error({ err: error }, '会话生成异常');
       },
@@ -433,6 +457,8 @@ interface PipeOptions {
     contextTokens?: number;
     worldbookHits?: number;
   };
+  /** 剧本事件提示：在正文之前发给前端 */
+  notices?: readonly { eventId: string; title: string; content: string; atTurn: number }[];
   onError?: (error: unknown) => void;
 }
 
@@ -467,6 +493,11 @@ async function pipeProviderStream(options: PipeOptions): Promise<PipeResult> {
     ...(meta?.contextTokens === undefined ? {} : { contextTokens: meta.contextTokens }),
     ...(meta?.worldbookHits === undefined ? {} : { worldbookHits: meta.worldbookHits }),
   });
+
+  // 剧本事件提示：让玩家知道「这一轮为什么突然有人推门进来」
+  for (const notice of options.notices ?? []) {
+    writeEvent(raw, { type: 'notice', ...notice });
+  }
 
   const result: PipeResult = {
     text: '',

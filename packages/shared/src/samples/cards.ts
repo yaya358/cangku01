@@ -17,6 +17,8 @@ export interface SampleCard {
   /** 头像的键（见 avatars.ts） */
   avatarKey: string;
   card: Record<string, unknown>;
+  /** 内置小剧本：到第几轮发生什么事（播种时一并写入） */
+  events?: { atTurn: number; title: string; content: string }[];
 }
 
 /** 少写点重复结构：把常用字段拼成 V2 卡。 */
@@ -55,6 +57,26 @@ export const SAMPLE_CARDS: SampleCard[] = [
         '（放下账本）正好，我刚想找个人说话。',
       ],
     }),
+    events: [
+      {
+        atTurn: 3,
+        title: '有人推门进来',
+        content:
+          '门被推开，风把炉火吹得歪了一下。进来的是个穿旧官服的老头，站在门口看见老板就愣住了，手一直按在腰间的刀鞘上，没说话。',
+      },
+      {
+        atTurn: 6,
+        title: '一张旧通缉令',
+        content:
+          '老头从怀里摸出一张折得发白的纸，摊在柜台上——那是一张十四年前的通缉令，画像上的脸年轻、没有胡须，但眼睛和老板一模一样。老头说：我找了你十四年。',
+      },
+      {
+        atTurn: 9,
+        title: '他认了',
+        content:
+          '老板把围裙解下来，慢慢叠好，放在柜台上。他没有辩解，只说了一句：那杯酒，你替我留着。（转身看向后厨的门）',
+      },
+    ],
   },
   {
     name: '夜巡人',
@@ -80,6 +102,20 @@ export const SAMPLE_CARDS: SampleCard[] = [
       tags: ['悬疑', '夜色', '克制'],
       alternate_greetings: ['（把灯笼换到另一只手）这么晚还在外面，有事？'],
     }),
+    events: [
+      {
+        atTurn: 3,
+        title: '远处传来铃声',
+        content:
+          '街尽头传来一声不该在今晚响的铜铃 —— 那是巡夜人自己系的警铃，挂在第九条街的灯柱上。他停下脚步，把手里的灯笼交给了你，说：你在这儿等。',
+      },
+      {
+        atTurn: 6,
+        title: '名单上少了一个名字',
+        content:
+          '他回来时把名单摊在雨里，纸都湿了。名单上最后一个名字被人用指甲划掉了 —— 那道划痕还没干。他没有解释，只把名单收进怀里：今晚的事，别跟人说。',
+      },
+    ],
   },
   {
     name: '吟游诗人',

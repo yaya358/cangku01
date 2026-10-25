@@ -34,6 +34,8 @@ export interface ChatBubble {
   pending?: boolean;
   /** 乐观插入、还没被服务端确认 */
   optimistic?: boolean;
+  /** 剧情事件提示（不是消息，只是这一轮发生了什么） */
+  notice?: { title: string; turn: number };
   /** 生成元信息，只在助手消息下方显示 */
   meta?: {
     model?: string | null;
@@ -230,6 +232,23 @@ export const useChatStore = defineStore('chat', () => {
                 optimistic: false,
                 swipes: [messages.value.find((b) => b.id === tempAssistantId)?.content ?? ''],
                 swipeIndex: 0,
+              });
+              break;
+            case 'notice':
+              /**
+               * 剧情事件：插一条居中提示。
+               *
+               * 它插在助手气泡之前，但这时代理人消息还没开始流式输出，
+               * 所以顺序上就是「提示 → 角色反应」。
+               */
+              messages.value.splice(messages.value.length - 1, 0, {
+                id: `notice-${event.eventId}`,
+                role: 'system',
+                content: event.content,
+                createdAt: new Date().toISOString(),
+                swipes: [],
+                swipeIndex: 0,
+                notice: { title: event.title, turn: event.atTurn },
               });
               break;
             case 'error':

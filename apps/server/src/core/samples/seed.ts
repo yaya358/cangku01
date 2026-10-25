@@ -56,11 +56,13 @@ export function seedSampleCharacters(app: AppInstance): SeedResult {
     if (found) {
       if (found.avatarUrl) {
         result.skipped.push(name);
+        SeedScriptEvents(app, found.id, sample);
         continue;
       }
       attachAvatar(app, found.id, name, sample.avatarKey);
       result.adopted.push(name);
       existing.set(name, { id: found.id, avatarUrl: '/avatar' });
+      SeedScriptEvents(app, found.id, sample);
       continue;
     }
 
@@ -69,12 +71,41 @@ export function seedSampleCharacters(app: AppInstance): SeedResult {
       specVersion: parsed.specVersion,
     });
     attachAvatar(app, created.id, name, sample.avatarKey);
+    SeedScriptEvents(app, created.id, sample);
     result.created.push(name);
     // 同一批里不重复建（理论上不会，但守住这点更安全）
     existing.set(name, { id: created.id, avatarUrl: '/avatar' });
   }
 
   return result;
+}
+
+/**
+ * 写入内置小剧本事件。
+ *
+ * 只在「该角色还没有任何事件」时写：用户自己写过的剧本不会被示例覆盖。
+ */
+function SeedScriptEvents(
+  app: AppInstance,
+  characterId: string,
+  sample: { name: string; events?: readonly { atTurn: number; title: string; content: string }[] },
+): void {
+  if (!sample.events || sample.events.length === 0) return;
+
+  try {
+    const existing = app.scriptEvents().listByCharacter(characterId);
+    if (existing.length > 0) return;
+
+    for (const event of sample.events) {
+      app.scriptEvents().create(characterId, {
+        atTurn: event.atTurn,
+        title: event.title,
+        content: event.content,
+      });
+    }
+  } catch (error) {
+    app.log.warn({ err: error, name: sample.name }, '示例剧本事件写入失败');
+  }
 }
 
 /** 写入头像文件并更新角色记录；失败不影响角色本身。 */

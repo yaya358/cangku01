@@ -112,6 +112,14 @@ export type ChatStreamPayload =
       swipeIndex: number;
       total: number;
     }
+  | {
+      /** 剧本事件触发：这一轮发生了什么（前端插一条居中提示） */
+      type: 'notice';
+      eventId: string;
+      title: string;
+      content: string;
+      atTurn: number;
+    }
   | { type: 'error'; code: string; message: string; retryable: boolean };
 
 /** 非流式接口的返回体。 */

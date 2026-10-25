@@ -76,60 +76,73 @@
         v-for="bubble in messages"
         :key="bubble.id"
         class="bubble"
-        :class="[`bubble--${bubble.role}`, { 'bubble--optimistic': bubble.optimistic }]"
+        :class="[
+          `bubble--${bubble.role}`,
+          { 'bubble--optimistic': bubble.optimistic, 'bubble--notice': bubble.notice },
+        ]"
       >
-        <p class="bubble__body">
-          {{ bubble.content
-          }}<span v-if="bubble.pending" class="bubble__caret" aria-hidden="true" />
+        <!-- 剧情事件：不是谁说的话，而是「这一轮发生了什么」 -->
+        <p v-if="bubble.notice" class="notice">
+          <span class="notice__head"
+            >第 {{ bubble.notice.turn }} 轮 · {{ bubble.notice.title }}</span
+          >
+          <span class="notice__body">{{ bubble.content }}</span>
         </p>
 
-        <div v-if="bubble.role === 'assistant'" class="bubble__tools">
-          <template v-if="bubble.swipes.length > 1">
+        <template v-else>
+          <p class="bubble__body">
+            {{ bubble.content
+            }}<span v-if="bubble.pending" class="bubble__caret" aria-hidden="true" />
+          </p>
+
+          <div v-if="bubble.role === 'assistant'" class="bubble__tools">
+            <template v-if="bubble.swipes.length > 1">
+              <button
+                class="tool"
+                type="button"
+                :disabled="bubble.swipeIndex === 0 || streaming"
+                title="上一版"
+                @click="store.switchSwipe(bubble.id, bubble.swipeIndex - 1)"
+              >
+                ‹
+              </button>
+              <span class="tool__page">{{ bubble.swipeIndex + 1 }}/{{ bubble.swipes.length }}</span>
+              <button
+                class="tool"
+                type="button"
+                :disabled="bubble.swipeIndex >= bubble.swipes.length - 1 || streaming"
+                title="下一版"
+                @click="store.switchSwipe(bubble.id, bubble.swipeIndex + 1)"
+              >
+                ›
+              </button>
+            </template>
+            <button
+              class="tool tool--regen"
+              type="button"
+              :disabled="streaming || bubble.optimistic"
+              title="让模型换个说法重新生成"
+              @click="store.regenerate(bubble.id)"
+            >
+              重说
+            </button>
             <button
               class="tool"
               type="button"
-              :disabled="bubble.swipeIndex === 0 || streaming"
-              title="上一版"
-              @click="store.switchSwipe(bubble.id, bubble.swipeIndex - 1)"
+              :disabled="streaming || bubble.optimistic"
+              title="从这句话开一条新的时间线"
+              @click="store.startBranch(bubble.id, bubble.content)"
             >
-              ‹
+              分支
             </button>
-            <span class="tool__page">{{ bubble.swipeIndex + 1 }}/{{ bubble.swipes.length }}</span>
-            <button
-              class="tool"
-              type="button"
-              :disabled="bubble.swipeIndex >= bubble.swipes.length - 1 || streaming"
-              title="下一版"
-              @click="store.switchSwipe(bubble.id, bubble.swipeIndex + 1)"
-            >
-              ›
-            </button>
-          </template>
-          <button
-            class="tool tool--regen"
-            type="button"
-            :disabled="streaming || bubble.optimistic"
-            title="让模型换个说法重新生成"
-            @click="store.regenerate(bubble.id)"
-          >
-            重说
-          </button>
-          <button
-            class="tool"
-            type="button"
-            :disabled="streaming || bubble.optimistic"
-            title="从这句话开一条新的时间线"
-            @click="store.startBranch(bubble.id, bubble.content)"
-          >
-            分支
-          </button>
-        </div>
+          </div>
 
-        <p v-if="bubble.meta && bubble.role === 'assistant'" class="bubble__meta">
-          <span v-if="bubble.meta.firstTokenMs">首字 {{ bubble.meta.firstTokenMs }}ms</span>
-          <span v-if="bubble.meta.durationMs">· 总 {{ bubble.meta.durationMs }}ms</span>
-          <span v-if="bubble.meta.totalTokens">· {{ bubble.meta.totalTokens }} tokens</span>
-        </p>
+          <p v-if="bubble.meta && bubble.role === 'assistant'" class="bubble__meta">
+            <span v-if="bubble.meta.firstTokenMs">首字 {{ bubble.meta.firstTokenMs }}ms</span>
+            <span v-if="bubble.meta.durationMs">· 总 {{ bubble.meta.durationMs }}ms</span>
+            <span v-if="bubble.meta.totalTokens">· {{ bubble.meta.totalTokens }} tokens</span>
+          </p>
+        </template>
       </article>
     </div>
 
@@ -405,6 +418,36 @@ onBeforeUnmount(() => {
 .bubble--system {
   max-width: 100%;
   align-items: center;
+}
+
+/* 剧情事件：视觉上明显不是「谁说的话」，而是旁白 */
+.bubble--notice {
+  max-width: 100%;
+  align-items: stretch;
+}
+
+.notice {
+  display: flex;
+  padding: 9px 14px;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px dashed rgba(224, 167, 94, 0.4);
+  border-radius: 10px;
+  background: rgba(224, 167, 94, 0.07);
+}
+
+.notice__head {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.notice__body {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
 }
 
 .bubble__body {

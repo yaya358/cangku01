@@ -23,6 +23,8 @@ const PRIORITY = {
   motive: 680,
   // 玩家身份：决定角色对谁说话，丢了就变成对陌生人客套
   userPersona: 730,
+  // 剧本事件：这一轮刚发生的事，比场景和世界书都更该被看到
+  event: 690,
   scenario: 650,
   worldbook: 600,
   summary: 500,
@@ -200,7 +202,31 @@ function collectLayers(input: AssembleInput, charName: string, userName: string)
     );
   }
 
-  // 5. 世界书（阶段 4 后续提交接入；这里先支持传入）
+  /**
+   * 5. 剧本事件（这一轮到点了，发生了什么）。
+   *
+   * 关键在最后那句指令：只描述「有人推门进来」还不够，
+   * 模型可能当旁白念一遍就继续闲聊 —— 必须明确要求它对这件事做出反应。
+   */
+  for (const event of input.events ?? []) {
+    layers.push(
+      makeLayer({
+        id: `event:${event.id}`,
+        kind: 'event',
+        title: `剧情 · ${event.title}`,
+        content: [
+          `【刚刚发生】${substitute(event.content, charName, userName)}`,
+          '这是此刻正在发生的事。你的回复必须让人看出你在应对它' +
+            '（动作、神态或一句话），不要只回答对方的问题，也不要把它当背景介绍略过。',
+        ].join('\n'),
+        priority: PRIORITY.event,
+        splittable: false,
+        meta: { turn: event.turn ?? 0 },
+      }),
+    );
+  }
+
+  // 6. 世界书（提到才注入的设定）
   for (const entry of input.worldbook ?? []) {
     layers.push(
       makeLayer({
@@ -356,6 +382,7 @@ function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
         layer.kind === 'user_persona' ||
         layer.kind === 'scenario' ||
         layer.kind === 'motive' ||
+        layer.kind === 'event' ||
         layer.kind === 'worldbook' ||
         layer.kind === 'summary',
     )
@@ -375,6 +402,13 @@ function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
     });
   }
 
+  /**
+   * 剧本事件并进最前面那条 system。
+   *
+   * 试过把它单独成条、插在历史之后（更贴近输入、通常更「显眼」），
+   * 但这个 provider 在「两条 system 相邻」时会出现只返回用量、没有正文的情况，
+   * 所以退回合并方案 —— 稳妥优先，指令本身已经写得够强硬。
+   */
   for (const layer of layers) {
     if (layer.kind !== 'post_history') continue;
     // 历史之后插一条 system：与 OpenAI 兼容层普遍支持，也能被模型明确读到

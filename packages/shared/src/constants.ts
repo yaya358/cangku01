@@ -108,3 +108,15 @@ export const WORLDBOOK_ENDPOINT = `${API_PREFIX}/worldbook`;
 export function worldbookEntryEndpoint(id: string): string {
   return `${WORLDBOOK_ENDPOINT}/${encodeURIComponent(id)}`;
 }
+
+/** 某角色的小剧本事件集合。 */
+export function scriptEventsEndpoint(characterId: string): string {
+  return `${characterEndpoint(characterId)}/events`;
+}
+
+/** 单条剧本事件。 */
+export const SCRIPT_EVENT_ENDPOINT = `${API_PREFIX}/script-events`;
+
+export function scriptEventEndpoint(id: string): string {
+  return `${SCRIPT_EVENT_ENDPOINT}/${encodeURIComponent(id)}`;
+}

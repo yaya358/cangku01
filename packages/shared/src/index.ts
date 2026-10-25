@@ -12,6 +12,7 @@ export * from './contracts/character.js';
 export * from './contracts/context.js';
 export * from './contracts/conversation.js';
 export * from './contracts/worldbook.js';
+export * from './contracts/script.js';
 
 // 内置示例角色（前后端共用：后端首次启动自动播种，前端用来展示说明）
 export * from './samples/cards.js';

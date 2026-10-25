@@ -6,6 +6,7 @@ import type { CharacterRepository } from '../core/character/repository.js';
 import type { ConversationRepository } from '../core/chat/conversation-repository.js';
 import type { MessageRepository } from '../core/chat/message-repository.js';
 import type { ExtensionRegistry } from '../core/extension/index.js';
+import type { ScriptEventRepository } from '../core/script/repository.js';
 import type { SqliteStorage } from '../core/storage/index.js';
 import type { WorldbookRepository } from '../core/worldbook/repository.js';
 import type { AppLogger } from '../lib/logger.js';
@@ -55,5 +56,7 @@ declare module 'fastify' {
     conversations: () => ConversationRepository;
     /** 消息仓储 */
     messages: () => MessageRepository;
+    /** 剧本事件仓储（含会话触发记录） */
+    scriptEvents: () => ScriptEventRepository;
   }
 }

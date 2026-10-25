@@ -4,6 +4,7 @@ import { registerChatRoutes } from './chat.js';
 import { registerContextRoutes } from './context.js';
 import { registerConversationRoutes } from './conversations.js';
 import { registerHealthRoutes } from './health.js';
+import { registerScriptRoutes } from './script.js';
 import { registerWorldbookRoutes } from './worldbook.js';
 import type { AppInstance } from '../../types/fastify.js';
 
@@ -22,4 +23,5 @@ export async function registerRoutes(app: AppInstance): Promise<void> {
   registerContextRoutes(app);
   registerConversationRoutes(app);
   registerWorldbookRoutes(app);
+  registerScriptRoutes(app);
 }

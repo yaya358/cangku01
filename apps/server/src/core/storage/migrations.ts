@@ -185,6 +185,40 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("ALTER TABLE conversations ADD COLUMN player_goal TEXT NOT NULL DEFAULT ''");
     },
   },
+  {
+    version: 7,
+    name: 'script-events',
+    up: (db) => {
+      /**
+       * 剧本事件：到第几轮，发生什么事。
+       *
+       * 这是把「闲聊」变成「短剧」的关键 —— 剧情不再全靠玩家推，
+       * 到点会有人推门进来、有人掏出通缉令。
+       */
+      db.exec(`
+        CREATE TABLE script_events (
+          id           TEXT PRIMARY KEY,
+          character_id TEXT NOT NULL REFERENCES characters (id) ON DELETE CASCADE,
+          at_turn      INTEGER NOT NULL,
+          title        TEXT NOT NULL,
+          content      TEXT NOT NULL,
+          created_at   TEXT NOT NULL,
+          updated_at   TEXT NOT NULL
+        )
+      `);
+      db.exec('CREATE INDEX idx_script_events_character ON script_events (character_id, at_turn)');
+
+      // 每个会话各自记录哪些事件已经发生过（同一条支线不会重复触发）
+      db.exec(`
+        CREATE TABLE conversation_events (
+          conversation_id TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
+          event_id        TEXT NOT NULL REFERENCES script_events (id) ON DELETE CASCADE,
+          fired_at        TEXT NOT NULL,
+          PRIMARY KEY (conversation_id, event_id)
+        )
+      `);
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

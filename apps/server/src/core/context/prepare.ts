@@ -24,6 +24,8 @@ export interface PrepareInput {
   userName?: string;
   /** 玩家身份：你是谁、你图什么。不传时角色会把你当陌生人 */
   player?: { name?: string; role?: string; goal?: string };
+  /** 本轮触发的剧本事件（到点发生的剧情） */
+  events?: readonly { id: string; title: string; content: string; turn?: number }[];
   budget?: Partial<Pick<ContextBudget, 'contextWindow' | 'reservedForOutput' | 'safetyMargin'>>;
   /** 扫描世界书时往回看几条历史，默认 6 */
   historyScanDepth?: number;
@@ -95,6 +97,7 @@ export function prepareConversationContext(input: PrepareInput): PreparedContext
     history,
     userInput,
     worldbook: toWorldbookLayers(worldbook.hits),
+    ...(input.events && input.events.length > 0 ? { events: input.events } : {}),
     userName: input.userName,
     ...(input.player ? { player: input.player } : {}),
     budget: input.budget,
