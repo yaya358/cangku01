@@ -22,6 +22,8 @@ export interface PrepareInput {
   /** 完整对话，最后一条应当是本次用户输入 */
   messages: readonly ChatMessage[];
   userName?: string;
+  /** 这句是说的、做的还是想的（决定 prompt 里怎么套壳） */
+  userInputKind?: 'speak' | 'act' | 'think' | 'narrate' | 'ooc';
   /** 玩家身份：你是谁、你图什么。不传时角色会把你当陌生人 */
   player?: { name?: string; role?: string; goal?: string };
   /** 本轮触发的剧本事件（到点发生的剧情） */
@@ -98,6 +100,7 @@ export function prepareConversationContext(input: PrepareInput): PreparedContext
     },
     history,
     userInput,
+    ...(input.userInputKind ? { userInputKind: input.userInputKind } : {}),
     worldbook: toWorldbookLayers(worldbook.hits),
     ...(input.events && input.events.length > 0 ? { events: input.events } : {}),
     ...(input.facts && input.facts.length > 0 ? { facts: input.facts } : {}),

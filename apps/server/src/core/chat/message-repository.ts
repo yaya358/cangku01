@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+﻿import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AppendMessageInput, Message, MessageUsage } from '@tavern/shared';
 
@@ -16,6 +16,7 @@ interface MessageRow {
   conversation_id: string;
   parent_id: string | null;
   role: string;
+  kind: string;
   content: string;
   swipes: string;
   swipe_index: number;
@@ -59,6 +60,7 @@ function rowToMessage(row: MessageRow): Message {
     conversationId: row.conversation_id,
     parentId: row.parent_id,
     role: row.role as Message['role'],
+    kind: (row.kind as Message['kind']) ?? 'speak',
     content: row.content,
     swipes: parseSwipes(row.swipes),
     swipeIndex: row.swipe_index,
@@ -126,14 +128,15 @@ export function createMessageRepository(db: DatabaseSync): MessageRepository {
 
       db.prepare(
         `INSERT INTO messages (
-          id, conversation_id, parent_id, role, content, swipes, swipe_index,
+          id, conversation_id, parent_id, role, kind, content, swipes, swipe_index,
           model, provider, usage, finish_reason, duration_ms, first_token_ms, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         conversationId,
         input.parentId ?? null,
         input.role,
+        input.kind ?? 'speak',
         input.content,
         swipes,
         input.model ?? null,

@@ -245,7 +245,7 @@ describe('对话接入上下文引擎', () => {
       expect(messages[0]?.content).toContain('王都是座不夜城');
       // 历史两条 + 本轮输入
       expect(messages.filter((message) => message.role === 'user')).toHaveLength(2);
-      expect(messages.at(-1)?.content).toBe('王都怎么走？');
+      expect(messages.at(-1)?.content).toContain('王都怎么走？');
       // 历史后指令也进来了
       expect(messages.some((message) => message.content.includes('不要用网络流行语'))).toBe(true);
     });

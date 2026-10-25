@@ -14,6 +14,16 @@ export const MESSAGE_ROLES = ['system', 'user', 'assistant'] as const;
 export const MessageRoleSchema = z.enum(MESSAGE_ROLES);
 export type MessageRole = z.infer<typeof MessageRoleSchema>;
 
+/**
+ * 玩家的输入方式。
+ *
+ * 为什么要它：同一句「推开门」，当成说话（"推开门"）和当行动（推开门）
+ * 交给模型会得到完全不同的结果。分开表达，模型不用猜，前端也能分样式渲染。
+ */
+export const MESSAGE_KINDS = ['speak', 'act', 'think', 'narrate', 'ooc'] as const;
+export const MessageKindSchema = z.enum(MESSAGE_KINDS);
+export type MessageKind = z.infer<typeof MessageKindSchema>;
+
 /** token 用量（与 chat 契约保持一致，单独定义避免循环依赖）。 */
 export const MessageUsageSchema = z.object({
   promptTokens: z.number().int().nonnegative(),
@@ -30,6 +40,8 @@ export const MessageSchema = z.object({
   parentId: z.string().nullable(),
   role: MessageRoleSchema,
   content: z.string(),
+  /** 输入方式：说的 / 做的 / 想的 / 旁白 / 场外 */
+  kind: MessageKindSchema,
   /** 重说的候选内容；空数组表示没有候选（普通消息） */
   swipes: z.array(z.string()),
   /** 当前选中的候选下标 */
@@ -95,6 +107,8 @@ export type UpdateConversationInput = z.infer<typeof UpdateConversationSchema>;
 export const AppendMessageSchema = z.object({
   role: MessageRoleSchema,
   content: z.string().max(200_000),
+  /** 不传就是「说话」，老调用方不用改 */
+  kind: MessageKindSchema.optional(),
   parentId: z.string().optional(),
   model: z.string().optional(),
   provider: z.string().optional(),
@@ -143,6 +157,8 @@ export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
  */
 export const SendMessageSchema = z.object({
   content: z.string().min(1, '消息不能为空').max(20_000),
+  /** 这句是说的还是做的；默认说话 */
+  kind: MessageKindSchema.default('speak'),
   provider: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   userName: z.string().min(1).max(40).optional(),

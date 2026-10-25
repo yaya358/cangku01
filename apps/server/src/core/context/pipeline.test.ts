@@ -104,7 +104,8 @@ describe('上下文组装 · 顺序', () => {
     // 历史后指令在历史之后、输入之前
     expect(messages[2]?.role).toBe('system');
     expect(messages[2]?.content).toContain('不要用网络流行语');
-    expect(messages[3]).toMatchObject({ role: 'user', content: '来一杯最烈的。' });
+    expect(messages[3]?.role).toBe('user');
+    expect(messages[3]?.content).toContain('来一杯最烈的。');
   });
 
   it('{{char}} / {{user}} 会被替换成实际名字', () => {
@@ -122,7 +123,7 @@ describe('上下文组装 · 顺序', () => {
 
     const system = context.messages[0]?.content ?? '';
     expect(system).toContain('酒保 认识 旅人');
-    expect(context.messages.at(-1)?.content).toBe('酒保，老样子。');
+    expect(context.messages.at(-1)?.content).toContain('酒保，老样子。');
   });
 
   it('空字段不会在 prompt 里留下空行', () => {

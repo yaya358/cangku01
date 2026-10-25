@@ -405,7 +405,7 @@ describe('重说（/regenerate）', () => {
       // 关键：发给模型的上下文不能包含被重说的那条回复（否则会复读自己）
       const request = requests.at(-1);
       expect(request?.messages.some((message) => message.content === '酒来了')).toBe(false);
-      expect(request?.messages.some((message) => message.content === '来一杯')).toBe(true);
+      expect(request?.messages.some((message) => message.content.includes('来一杯'))).toBe(true);
 
       // 元信息跟着新候选走：第一次 1100ms/12tokens，重说后 1200ms/14tokens
       expect(regenerated.durationMs).toBe(1200);

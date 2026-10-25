@@ -217,6 +217,7 @@ export function registerConversationRoutes(app: AppInstance): void {
     const userMessage = messagesRepo.append(id, {
       role: 'user',
       content: body.content,
+      kind: body.kind,
       ...(parentId ? { parentId } : {}),
     });
 
@@ -254,6 +255,7 @@ export function registerConversationRoutes(app: AppInstance): void {
       character,
       entries: app.worldbook().listForCharacter(character.id),
       messages: [...history, { role: 'user', content: body.content }],
+      userInputKind: body.kind,
       userName: body.userName ?? conversation.player.name,
       // 这一轮你是谁来、图什么 —— 决定角色会戒备、讨好还是试探
       player: conversation.player,

@@ -1,5 +1,6 @@
 import type {
   BranchSummary,
+  MessageKind,
   ChatStreamPayload,
   Conversation,
   Message,
@@ -34,6 +35,8 @@ export interface ChatBubble {
   pending?: boolean;
   /** 乐观插入、还没被服务端确认 */
   optimistic?: boolean;
+  /** 这条是我说的、还是做的、想的（决定气泡样式） */
+  kind?: MessageKind;
   /** 剧情事件提示（不是消息，只是这一轮发生了什么） */
   notice?: { title: string; turn: number };
   /** 生成元信息，只在助手消息下方显示 */
@@ -77,6 +80,7 @@ export const useChatStore = defineStore('chat', () => {
       id: message.id,
       role: message.role,
       content: message.content,
+      kind: message.kind,
       createdAt: message.createdAt,
       swipes: message.swipes,
       swipeIndex: message.swipeIndex,
@@ -173,7 +177,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function send(content: string): Promise<void> {
+  async function send(content: string, kind: MessageKind = 'speak'): Promise<void> {
     const text = content.trim();
     const current = conversation.value;
     if (!current || text.length === 0 || streaming.value) return;
@@ -188,6 +192,7 @@ export const useChatStore = defineStore('chat', () => {
       id: tempUserId,
       role: 'user',
       content: text,
+      kind,
       createdAt: new Date().toISOString(),
       swipes: [],
       swipeIndex: 0,
@@ -217,6 +222,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await sendTurn(current.id, text, {
         signal: controller.signal,
+        kind,
         ...(parentId ? { parentId } : {}),
         onEvent: (event: ChatStreamPayload) => {
           switch (event.type) {

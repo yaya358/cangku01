@@ -93,13 +93,14 @@ export interface SendTurnHandlers {
 export async function sendTurn(
   conversationId: string,
   content: string,
-  handlers: SendTurnHandlers & { parentId?: string },
+  handlers: SendTurnHandlers & { parentId?: string; kind?: string },
 ): Promise<void> {
   const response = await fetch(conversationStreamEndpoint(conversationId), {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
     body: JSON.stringify({
       content,
+      ...(handlers.kind ? { kind: handlers.kind } : {}),
       ...(handlers.parentId ? { parentId: handlers.parentId } : {}),
     }),
     signal: handlers.signal,

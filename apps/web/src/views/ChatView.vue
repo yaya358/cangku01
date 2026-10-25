@@ -87,6 +87,7 @@
         class="bubble"
         :class="[
           `bubble--${bubble.role}`,
+          bubble.kind ? `bubble--${bubble.kind}` : '',
           { 'bubble--optimistic': bubble.optimistic, 'bubble--notice': bubble.notice },
         ]"
       >
@@ -156,10 +157,25 @@
     </div>
 
     <div class="chat__input">
+      <!-- 输入方式：决定这句是说的、做的还是想的（prompt 与气泡样式都不同） -->
+      <div class="modes">
+        <button
+          v-for="item in INPUT_MODES"
+          :key="item.value"
+          class="mode"
+          type="button"
+          :class="{ 'mode--on': mode === item.value }"
+          :disabled="streaming"
+          @click="mode = item.value"
+        >
+          {{ item.label }}
+        </button>
+        <span class="modes__hint">{{ currentMode.hint }}</span>
+      </div>
       <n-input
         v-model:value="draft"
         type="textarea"
-        placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"
+        :placeholder="currentMode.placeholder"
         :autosize="{ minRows: 2, maxRows: 6 }"
         :disabled="streaming || loading || !conversation"
         @keydown="onKeydown"
@@ -198,6 +214,45 @@ const route = useRoute();
 const store = useChatStore();
 const { messages, loading, streaming, error, conversation, isEmpty, branches, branchFrom } =
   storeToRefs(store);
+
+/** 输入方式：说话最常用，放第一个 */
+const INPUT_MODES = [
+  {
+    value: 'speak' as const,
+    label: '说话',
+    placeholder: '说点什么…（Enter 发送，Shift+Enter 换行）',
+    hint: '会包成「你说：…」，角色当作听到的话',
+  },
+  {
+    value: 'act' as const,
+    label: '行动',
+    placeholder: '你要做什么…（例如：把杯子推到他面前）',
+    hint: '会包成「你（行动）：…」，角色当作看到的事——做不做得到由世界决定',
+  },
+  {
+    value: 'think' as const,
+    label: '心里想',
+    placeholder: '想什么…（说出口的和想的不一样时很好用）',
+    hint: '角色不会知道你在想什么',
+  },
+  {
+    value: 'narrate' as const,
+    label: '旁白',
+    placeholder: '叙述一段环境或时间跳跃…',
+    hint: '当成场景叙述，不当作你说的话',
+  },
+  {
+    value: 'ooc' as const,
+    label: '场外',
+    placeholder: '对扮演本身的说明（例如：这段写得再简短些）',
+    hint: '不是角色的台词，是你在跟"导演"说话',
+  },
+];
+
+const mode = ref<(typeof INPUT_MODES)[number]['value']>('speak');
+const currentMode = computed(
+  () => INPUT_MODES.find((item) => item.value === mode.value) ?? INPUT_MODES[0]!,
+);
 
 const draft = ref('');
 const character = ref<Character | null>(null);
@@ -250,7 +305,7 @@ function submit(): void {
   if (!canSend.value) return;
   const text = draft.value;
   draft.value = '';
-  void store.send(text);
+  void store.send(text, mode.value);
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -653,5 +708,61 @@ onBeforeUnmount(() => {
   .chat__log {
     min-height: 320px;
   }
+}
+
+/* 输入方式切换 */
+.modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.mode:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
+.mode--on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.modes__hint {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* 行动用斜体、心里想用灰色、旁白居中 —— 一眼看出这是在做什么 */
+.bubble--act .bubble__body {
+  border-style: dashed;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.bubble--think .bubble__body {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.bubble--narrate .bubble__body,
+.bubble--ooc .bubble__body {
+  border-style: dotted;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
 }
 </style>

@@ -86,6 +86,30 @@ export function truncateToTokens(text: string, maxTokens: number): string {
   return `${candidate.trimEnd()}…`;
 }
 
+/**
+ * 按输入方式给玩家这句话套壳。
+ *
+ * 为什么要区分：同一句「推开门」，
+ *   当成说话（他说"推开门"）和当行动（他推开门）交给模型是两回事。
+ * 套上壳模型就不用猜，也不会把行动当成一句话复述回来。
+ */
+function wrapUserInput(input: AssembleInput, userName: string): string {
+  const text = input.userInput.trim();
+  switch (input.userInputKind) {
+    case 'act':
+      return `${userName}（行动）：${text}`;
+    case 'think':
+      return `${userName}（心里想，没有说出口）：${text}`;
+    case 'narrate':
+      return `【旁白】${text}`;
+    case 'ooc':
+      return `【场外（不是角色的发言，是玩家在跟你说话）】${text}`;
+    case 'speak':
+    default:
+      return `${userName}说：「${text}」`;
+  }
+}
+
 /** 收集所有层（未裁剪），顺序即拼装顺序。 */
 function collectLayers(input: AssembleInput, charName: string, userName: string): ContextLayer[] {
   const layers: (ContextLayer | null)[] = [];
@@ -317,7 +341,7 @@ function collectLayers(input: AssembleInput, charName: string, userName: string)
       id: 'user_input',
       kind: 'user_input',
       title: '本轮输入',
-      content: substitute(input.userInput.trim(), charName, userName),
+      content: substitute(wrapUserInput(input, userName), charName, userName),
       priority: PRIORITY.userInput,
       splittable: false,
     }),

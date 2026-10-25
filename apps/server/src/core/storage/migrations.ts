@@ -249,6 +249,19 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 9,
+    name: 'message-kind',
+    up: (db) => {
+      /**
+       * 这条消息是「说的」还是「做的」还是「想的」。
+       *
+       * 同一句「推开门」，当成说话（他说"推开门"）和当行动（他推开门）交给模型，
+       * 得到的是完全不同的两段文字。存下来才知道当时是怎么输入的。
+       */
+      db.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'speak'");
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */
