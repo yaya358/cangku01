@@ -351,17 +351,22 @@ onMounted(() => {
   text-decoration: none;
 }
 
+/* 头像是方形胸像：给一块方形的舞台，别用横幅裁掉半张脸 */
 .card__avatar {
   display: grid;
-  height: 132px;
+  height: 152px;
   place-items: center;
-  background: linear-gradient(150deg, #2a2118, #16120f);
   border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(224, 167, 94, 0.1), transparent 70%),
+    linear-gradient(150deg, #2a2118, #16120f);
 }
 
 .card__avatar img {
-  width: 100%;
-  height: 100%;
+  width: 120px;
+  height: 120px;
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
   object-fit: cover;
 }
 
