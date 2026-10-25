@@ -79,7 +79,7 @@ describe('迁移 15：旧对话 → 场景', () => {
 
     runMigrations(db);
 
-    expect(LATEST_VERSION).toBe(16);
+    expect(LATEST_VERSION).toBe(17);
 
     const conversation = db
       .prepare('SELECT scene_id FROM conversations WHERE id = ?')
@@ -189,5 +189,87 @@ describe('迁移 15：旧对话 → 场景', () => {
       { id: 'u2', parent_id: 'a1' },
       { id: 'a2', parent_id: 'u2' },
     ]);
+  });
+});
+
+describe('迁移 17：主线指名到人', () => {
+  /** 造一个已有存档：三个人都在场，只有夜巡人给过情报，两章旧主线。 */
+  function seedLegacyMainline(): { saveId: string; catId: string } {
+    const at = new Date().toISOString();
+    const characters = createCharacterRepository(db);
+    const catId = characters.create({ ...BLANK, name: '猫' }).id;
+    const saveId = 'save-legacy';
+    db.prepare(
+      'INSERT INTO saves (id, name, chapter, created_at, updated_at) VALUES (?, ?, 2, ?, ?)',
+    ).run(saveId, '月灯镇', at, at);
+    const sceneId = 'scene-legacy';
+    db.prepare(
+      `INSERT INTO scenes (id, save_id, name, kind, closeness, created_at, updated_at)
+       VALUES (?, ?, '酒馆', 'public', 0.35, ?, ?)`,
+    ).run(sceneId, saveId, at, at);
+
+    // 进场顺序：夜巡人 → 月灯老板 → 猫（entered_turn 全是 1，真实的乱象）
+    for (const characterId of [patrolId, bossId, catId]) {
+      db.prepare(
+        `INSERT INTO presence (scene_id, character_id, entered_turn, left_turn, busy_with, reason)
+         VALUES (?, ?, 1, NULL, NULL, NULL)`,
+      ).run(sceneId, characterId);
+    }
+
+    // 夜巡人已经松过口（情报来源里就是他）—— 再把他当焦点没用
+    db.prepare(
+      "INSERT INTO clues (id, save_id, content, source, source_turn, quote, known_at) VALUES ('clue-1', ?, '名单上最后一个人是他自己', '夜巡人', 3, '原话', ?)",
+    ).run(saveId, at);
+
+    for (const chapter of [1, 2]) {
+      db.prepare(
+        `INSERT INTO quests (id, save_id, chapter, title, goal, status, required_clues, required_affinity, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '', ?, ?, 60, ?, ?)`,
+      ).run(
+        `quest-${chapter}`,
+        saveId,
+        chapter,
+        `第 ${chapter} 章`,
+        chapter === 1 ? 'done' : 'active',
+        chapter,
+        at,
+        at,
+      );
+    }
+
+    return { saveId, catId };
+  }
+
+  it('焦点跳过「已经给过情报的人」，按进场顺序往下排', () => {
+    seedLegacyMainline();
+    runMigrations(db);
+
+    const rows = db
+      .prepare('SELECT id, focus_character_id FROM quests ORDER BY chapter ASC')
+      .all() as { id: string; focus_character_id: string | null }[];
+
+    // 夜巡人已经松过口 → 第一章给月灯老板；第二章再往下一个，给猫
+    expect(rows[0]!.focus_character_id).toBe(bossId);
+    expect(rows[1]!.focus_character_id).not.toBe(patrolId);
+    expect(rows[1]!.focus_character_id).not.toBeNull();
+  });
+
+  it('没人在场时留空，回退到「全存档最高好感」', () => {
+    const saveId = 'save-empty';
+    const at = new Date().toISOString();
+    db.prepare(
+      'INSERT INTO saves (id, name, chapter, created_at, updated_at) VALUES (?, ?, 1, ?, ?)',
+    ).run(saveId, '空存档', at, at);
+    db.prepare(
+      `INSERT INTO quests (id, save_id, chapter, title, goal, status, required_clues, required_affinity, created_at, updated_at)
+       VALUES ('q-empty', ?, 1, '第一章', '', 'active', 1, 0, ?, ?)`,
+    ).run(saveId, at, at);
+
+    runMigrations(db);
+
+    const row = db.prepare("SELECT focus_character_id FROM quests WHERE id = 'q-empty'").get() as {
+      focus_character_id: string | null;
+    };
+    expect(row.focus_character_id).toBeNull();
   });
 });

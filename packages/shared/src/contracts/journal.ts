@@ -25,6 +25,12 @@ export const QuestSchema = z.object({
   /** 这一章要弄明白什么（给人看的一句话） */
   goal: z.string(),
   status: QuestStatusSchema,
+  /**
+   * 这一章指着谁：进度、下一步、情报来源都落到这个人身上。
+   * null 表示这一章不指定人（例如世界里还没人）。
+   */
+  focusCharacterId: z.string().nullable(),
+  focusCharacterName: z.string().nullable(),
   /** 关掉这一章需要几条情报 */
   requiredClues: z.number().int().nonnegative(),
   /** 关掉这一章还需要有人的好感达到多少（0 = 不看好感） */
@@ -54,9 +60,16 @@ export type Clue = z.infer<typeof ClueSchema>;
 export const QuestProgressSchema = z.object({
   clues: z.number().int().nonnegative(),
   needed: z.number().int().nonnegative(),
-  /** 存档里最高的一份好感 */
+  /** 焦点角色对你的好感（这一章指着的那个人） */
   affinity: z.number().int().min(0).max(100),
   requiredAffinity: z.number().int().min(0).max(100),
+  /**
+   * 下一步该干嘛，一句人话。
+   *
+   * 写在服务端是故意的：它要同时说清「差什么」「找谁」，
+   * 跟判定逻辑分开放就会走散 —— 之前主线看不明白就是这个原因。
+   */
+  nextStep: z.string(),
 });
 export type QuestProgress = z.infer<typeof QuestProgressSchema>;
 

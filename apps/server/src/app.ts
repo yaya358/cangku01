@@ -183,23 +183,31 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     return worldRepo;
   });
 
+  /**
+   * 按 id 取角色名，给「好感 / 主线」这类要显示人名的仓储用。
+   *
+   * 自己兜一次懒创建：好感列表可能先于角色接口被访问，
+   * 那时 characterRepo 还是 null，不该因此读出一片「某人」。
+   */
+  const resolveCharacterName = (characterId: string): string | undefined => {
+    if (!storage.isOpen) return undefined;
+    characterRepo ??= createCharacterRepository(storage.db);
+    return characterRepo.getById(characterId)?.name;
+  };
+
   let affinityRepo: AffinityRepository | null = null;
   app.decorate('affinity', (): AffinityRepository => {
     if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
     // 名字从角色仓储取：好感列表里要显示人名，不该让调用方再查一遍。
     // 这里自己兜一次懒创建：好感先于角色被访问时也不会读出一片「某人」。
-    affinityRepo ??= createAffinityRepository(storage.db, (characterId) => {
-      if (!storage.isOpen) return undefined;
-      characterRepo ??= createCharacterRepository(storage.db);
-      return characterRepo.getById(characterId)?.name;
-    });
+    affinityRepo ??= createAffinityRepository(storage.db, resolveCharacterName);
     return affinityRepo;
   });
 
   let journalRepo: JournalRepository | null = null;
   app.decorate('journal', (): JournalRepository => {
     if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
-    journalRepo ??= createJournalRepository(storage.db);
+    journalRepo ??= createJournalRepository(storage.db, resolveCharacterName);
     return journalRepo;
   });
 

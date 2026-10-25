@@ -792,10 +792,11 @@ describe('好感度', () => {
 });
 
 describe('主线与情报本', () => {
-  it('第一次打开就有第一章，情报本是空的', async () => {
+  it('第一次打开就有第一章，而且是按在场的人现编的', async () => {
     await withApp(async ({ app }) => {
       const boss = await seedCharacter(app, '月灯老板');
-      const { saveId } = await seedSave(app, '月灯镇', [boss]);
+      const patrol = await seedCharacter(app, '夜巡人');
+      const { saveId } = await seedSave(app, '月灯镇', [boss, patrol]);
 
       const response = await app.inject({
         method: 'GET',
@@ -805,10 +806,19 @@ describe('主线与情报本', () => {
       const journal = response.json().data;
 
       expect(journal.chapter).toBe(1);
-      expect(journal.quest).toMatchObject({ chapter: 1, status: 'active' });
-      expect(journal.quest.title).toContain('第一章');
+      // 一章指着一个人：第一章就该是老板，进度也按他算
+      expect(journal.quest).toMatchObject({
+        chapter: 1,
+        status: 'active',
+        focusCharacterId: boss,
+        focusCharacterName: '月灯老板',
+      });
+      expect(journal.quest.title).toContain('月灯老板');
+      expect(journal.quests).toHaveLength(2);
       expect(journal.clues).toEqual([]);
-      expect(journal.progress).toMatchObject({ clues: 0, affinity: 0 });
+      // 还没打过交道的人按初始值 50 算，界面上的条才不会是空的
+      expect(journal.progress).toMatchObject({ clues: 0, affinity: 50, requiredAffinity: 60 });
+      expect(String(journal.progress.nextStep)).toContain('月灯老板');
     });
   });
 
@@ -817,9 +827,10 @@ describe('主线与情报本', () => {
       const boss = await seedCharacter(app, '月灯老板', {
         secret: '名单上最后一个人是他自己。他巡夜，是因为不敢睡。',
       });
-      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+      const patrol = await seedCharacter(app, '夜巡人');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss, patrol]);
 
-      // 先把好感摆到 58：这一轮 +3 就跨过 60（松口）
+      // 先把老板的好感摆到 58：这一轮 +3 就跨过 60（松口）
       app.affinity().apply(saveId, boss, 8, '（用例安排）');
 
       const frames = await speak(app, sceneId, '我替你把这件事瞒下来。');
@@ -828,10 +839,11 @@ describe('主线与情报本', () => {
       expect(String(clue?.content)).toContain('名单上最后一个人是他自己');
       expect(clue?.quote).toBeTruthy();
 
-      // 第一章只需要一条情报：这一轮就过关，进第二章
+      // 第一章只要 1 条情报 + 老板 60：这一轮就过关，进第二章（指着夜巡人）
       const quest = findEvent(frames, 'quest');
       expect(quest).toMatchObject({ chapter: 2, finished: false });
       expect(String(quest?.title)).toContain('第二章');
+      expect(String(quest?.title)).toContain('夜巡人');
 
       const journal = (
         await app.inject({ method: 'GET', url: `/api/world/saves/${saveId}/journal` })
@@ -841,6 +853,7 @@ describe('主线与情报本', () => {
       expect(journal.clues[0]).toMatchObject({ source: '月灯老板', sourceTurn: 1 });
       expect(journal.quests).toHaveLength(2);
       expect(journal.quests[0]).toMatchObject({ chapter: 1, status: 'done' });
+      expect(journal.quest).toMatchObject({ focusCharacterName: '夜巡人' });
       expect(journal.progress).toMatchObject({ clues: 1, needed: 2, requiredAffinity: 60 });
     });
   });

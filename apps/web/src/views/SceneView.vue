@@ -49,13 +49,13 @@
 
     <template v-else-if="scene">
       <div class="scene__body">
-        <!-- 左：主线。你此刻要弄明白什么 -->
+        <!-- 左：主线。你此刻要弄明白什么、该去找谁 -->
         <aside class="side side--left">
           <p class="side__head">主线</p>
           <template v-if="journal?.quest">
             <p class="quest__chapter">第 {{ journal.chapter }} 章</p>
             <p class="quest__title">{{ journal.quest.title }}</p>
-            <p class="quest__goal">目标：{{ journal.quest.goal }}</p>
+            <p v-if="focusName" class="quest__focus">找：{{ focusName }}</p>
             <p class="quest__progress">
               情报 {{ journal.progress?.clues ?? 0 }}/{{ journal.progress?.needed ?? 0 }}
               <span v-if="(journal.progress?.requiredAffinity ?? 0) > 0">
@@ -64,6 +64,33 @@
                 }}
               </span>
             </p>
+
+            <!-- 下一步：说清差什么、找谁 —— 打开就知道该干嘛 -->
+            <p v-if="journal.progress?.nextStep" class="quest__next">
+              {{ journal.progress.nextStep }}
+            </p>
+
+            <!-- 不知道说什么时，至少先把「对谁说」摆好 -->
+            <div v-if="focusName" class="quest__actions">
+              <button
+                class="tool"
+                type="button"
+                :disabled="streaming"
+                title="在输入框里填上 @他，剩下的你想说什么就说什么"
+                @click="addressFocus(false)"
+              >
+                @{{ focusName }}
+              </button>
+              <button
+                class="tool"
+                type="button"
+                :disabled="streaming"
+                title="切到低声，同样把 @他 填好"
+                @click="addressFocus(true)"
+              >
+                低声问
+              </button>
+            </div>
           </template>
           <p v-else class="side__empty">这一条主线演完了 —— 世界还在，人可以继续聊。</p>
 
@@ -207,6 +234,7 @@
             </div>
 
             <n-input
+              ref="draftRef"
               v-model:value="draft"
               type="textarea"
               :placeholder="currentMode.placeholder"
@@ -235,6 +263,7 @@
 
           <p v-if="clues.length === 0" class="side__empty">
             还没有情报。有人愿意跟你说真话时，这里会多一条。
+            <template v-if="focusName">这一章要的是{{ focusName }}的那一句。</template>
           </p>
 
           <ul v-else class="clues">
@@ -247,6 +276,10 @@
               >
                 <span class="clue__index">{{ index + 1 }}</span>
                 <span class="clue__text">{{ clue.content }}</span>
+                <!-- 这一章要的那条标出来：情报本不是流水账 -->
+                <span v-if="focusName && clue.source === focusName" class="clue__badge">
+                  主线
+                </span>
               </button>
               <p class="clue__meta">
                 {{ clue.source || '你自己' }}
@@ -375,6 +408,7 @@ const currentMode = computed(
 );
 
 const draft = ref('');
+const draftRef = ref<{ focus: () => void } | null>(null);
 const logRef = ref<HTMLElement | null>(null);
 /** 点开的那个人的提示（null = 收起） */
 const hintFor = ref<string | null>(null);
@@ -392,9 +426,25 @@ const clues = computed(() => store.journal?.clues ?? []);
 const pastQuests = computed(
   () => store.journal?.quests.filter((quest) => quest.status === 'done') ?? [],
 );
+/** 这一章指着谁：进度、下一步、情报来源都以他为准 */
+const focusName = computed(() => store.journal?.quest?.focusCharacterName ?? null);
 
 function toggleClue(clueId: string): void {
   expandedClue.value = expandedClue.value === clueId ? null : clueId;
+}
+
+/**
+ * 「不知道说什么」时最省事的一步：先把 @他 填进输入框。
+ *
+ * 不替玩家写台词 —— 那会让这一场变成念稿；只解决「对谁说」和「用什么音量说」。
+ */
+async function addressFocus(whisper: boolean): Promise<void> {
+  const name = focusName.value;
+  if (!name) return;
+  draft.value = `@${name} `;
+  mode.value = whisper ? 'whisper' : 'speak';
+  await nextTick();
+  draftRef.value?.focus();
 }
 
 function avatarOf(characterId: string): string {
@@ -635,17 +685,33 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
-.quest__goal {
-  color: var(--text-dim);
+/* 「找：夜巡人」：主线里最该被一眼看到的是人名 */
+.quest__focus {
+  color: var(--accent);
   font-size: 11.5px;
-  line-height: 1.75;
 }
 
-/* 进度用等宽字体：数字要对齐，玩家才觉得自己在推一条线 */
 .quest__progress {
   color: var(--accent);
   font-family: var(--font-mono);
   font-size: 10.5px;
+}
+
+/* 下一步：差什么、找谁，一句人话 */
+.quest__next {
+  padding: 6px 8px;
+  border-left: 2px solid rgba(224, 167, 94, 0.45);
+  border-radius: 0 6px 6px 0;
+  background: rgba(224, 167, 94, 0.06);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.quest__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .quest__history {
@@ -702,6 +768,18 @@ onBeforeUnmount(() => {
 
 .clue__text {
   flex: 1;
+}
+
+/* 主线要的那条：别的可以先放着，这条不能丢 */
+.clue__badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border: 1px solid rgba(224, 167, 94, 0.4);
+  border-radius: 999px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 15px;
 }
 
 .clue__meta {

@@ -88,6 +88,38 @@ export function registerWorldRoutes(app: AppInstance): void {
   }
 
   /**
+   * 这个存档里「出现过的人」，按场景与进场顺序排。
+   *
+   * 主线现在按人写（一章指着一个人），所以得先知道有哪些人可写；
+   * 从没进过场的人不算 —— 世界是有边界的。
+   */
+  function castOf(saveId: string): { id: string; name: string }[] {
+    const seen = new Set<string>();
+    const cast: { id: string; name: string }[] = [];
+    for (const scene of app.world().listScenes(saveId)) {
+      for (const person of describePresent(scene.id)) {
+        if (seen.has(person.id)) continue;
+        seen.add(person.id);
+        cast.push({ id: person.id, name: person.name });
+      }
+    }
+    return cast;
+  }
+
+  /** 主线判定要的两个数：焦点角色的好感 + 全存档最高好感（没有焦点时兜底）。 */
+  function questValues(saveId: string): { focusAffinity: number; maxAffinity: number } {
+    const quest = app.journal().activeQuest(saveId);
+    const maxAffinity = app
+      .affinity()
+      .list(saveId)
+      .reduce((max, item) => Math.max(max, item.value), 0);
+    const focusAffinity = quest?.focusCharacterId
+      ? app.affinity().get(saveId, quest.focusCharacterId).value
+      : maxAffinity;
+    return { focusAffinity, maxAffinity };
+  }
+
+  /**
    * 往场景日志里写一条「不是谁说的话，而是发生了一件事」。
    *
    * 用的是 system 消息：组装上下文时它会被过滤掉（不污染模型的历史），
@@ -201,10 +233,8 @@ export function registerWorldRoutes(app: AppInstance): void {
     if (!app.world().getSave(id)) throw AppError.notFound(`存档不存在: ${id}`);
 
     const journal = app.journal();
-    journal.ensureMainline(id);
-
-    const affinity = app.affinity().list(id);
-    const maxAffinity = affinity.reduce((max, item) => Math.max(max, item.value), 0);
+    // 按在场的人现编主线：一章指着一个人，玩家才知道该去找谁
+    journal.ensureMainline(id, castOf(id));
 
     return success(request.id, {
       saveId: id,
@@ -212,7 +242,7 @@ export function registerWorldRoutes(app: AppInstance): void {
       quest: journal.activeQuest(id) ?? null,
       quests: journal.listQuests(id),
       clues: journal.listClues(id),
-      progress: journal.progress(id, maxAffinity),
+      progress: journal.progress(id, questValues(id)),
     });
   });
 
@@ -651,18 +681,14 @@ export function registerWorldRoutes(app: AppInstance): void {
     }
 
     /**
-     * 主线推进：情报够了、也有人愿意说真话，这一章就算过去了。
+     * 主线推进：情报够了、焦点角色也愿意说真话了，这一章就算过去。
      *
      * 每轮都查一次而不是只在「拿到情报」时查：好感与情报是两个条件，
      * 可能这一轮才凑齐，漏查一次玩家就得多说一句废话。
      */
-    const maxAffinity = app
-      .affinity()
-      .list(scene.saveId)
-      .reduce((max, item) => Math.max(max, item.value), 0);
-    // 先把第一章补上：没打开过侧栏的存档也得能推进
-    app.journal().ensureMainline(scene.saveId);
-    const advancedChapter = app.journal().advance(scene.saveId, maxAffinity);
+    // 先把主线补上：没打开过侧栏的存档也得能推进
+    app.journal().ensureMainline(scene.saveId, castOf(scene.saveId));
+    const advancedChapter = app.journal().advance(scene.saveId, questValues(scene.saveId));
     if (advancedChapter.advanced) {
       writeEvent(raw, {
         type: 'quest',

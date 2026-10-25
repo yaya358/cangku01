@@ -546,6 +546,63 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 17,
+    name: 'quest-focus-character',
+    up: (db) => {
+      /**
+       * 每一章指名一个人。
+       *
+       * 之前的主线是「让在场有人愿意说点什么」这种抽象目标，进度又取全存档最高好感 ——
+       * 于是「好感 61/60」显示达标了却没过章，玩家看不出差在哪。绑定焦点角色之后，
+       * 进度、下一步、情报来源都落在同一个名字上。
+       *
+       * 已有章节的补法：按在场顺序挑「还没给过你情报」的人 ——
+       * 已经松过口的人再当焦点没用（一个角色只会松口一次），
+       * 拿情报本的来源名当「已经给过」的信号。
+       */
+      db.exec('ALTER TABLE quests ADD COLUMN focus_character_id TEXT');
+
+      const cluesBySave = new Map<string, Set<string>>();
+      for (const row of db.prepare('SELECT save_id, source FROM clues').all() as unknown as {
+        save_id: string;
+        source: string | null;
+      }[]) {
+        const used = cluesBySave.get(row.save_id) ?? new Set<string>();
+        if (row.source) used.add(row.source);
+        cluesBySave.set(row.save_id, used);
+      }
+
+      // SQLite 的 LIMIT/OFFSET 不能引用外层列（相关子查询在这里行不通），
+      // 所以一行行补；按 rowid 排才是真正的进场顺序（entered_turn 常常都等于 1）。
+      const presentOf = db.prepare(
+        `SELECT p.character_id, c.name
+         FROM presence AS p
+         JOIN scenes AS s ON s.id = p.scene_id
+         LEFT JOIN characters AS c ON c.id = p.character_id
+         WHERE s.save_id = ? AND p.left_turn IS NULL
+         ORDER BY p.entered_turn ASC, p.rowid ASC`,
+      );
+      const setFocus = db.prepare('UPDATE quests SET focus_character_id = ? WHERE id = ?');
+
+      const quests = db
+        .prepare('SELECT id, save_id FROM quests ORDER BY save_id ASC, chapter ASC')
+        .all() as unknown as { id: string; save_id: string }[];
+
+      for (const quest of quests) {
+        const used = cluesBySave.get(quest.save_id) ?? new Set<string>();
+        const candidates = presentOf.all(quest.save_id) as unknown as {
+          character_id: string;
+          name: string | null;
+        }[];
+        const pick = candidates.find((item) => !item.name || !used.has(item.name));
+        if (!pick) continue;
+        setFocus.run(pick.character_id, quest.id);
+        if (pick.name) used.add(pick.name);
+        cluesBySave.set(quest.save_id, used);
+      }
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */
