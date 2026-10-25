@@ -10,7 +10,7 @@ services:
     image: tavern-ai:local
     container_name: tavern-ai
     ports:
-      - '8787:8787'
+      - "8787:8787"
     environment:
       NODE_ENV: production
       # 需要在容器外访问时改成 0.0.0.0

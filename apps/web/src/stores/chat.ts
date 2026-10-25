@@ -89,6 +89,17 @@ export const useChatStore = defineStore('chat', () => {
     };
   }
 
+  /** 读会话列表；返回结果也顺手存进 list，方便页面直接渲染。 */
+  async function loadListAll(): Promise<Conversation[]> {
+    try {
+      list.value = await listConversations();
+      return list.value;
+    } catch (cause) {
+      error.value = describeError(cause);
+      return [];
+    }
+  }
+
   async function loadList(character?: string): Promise<void> {
     try {
       list.value = await listConversations(character);
@@ -420,6 +431,7 @@ export const useChatStore = defineStore('chat', () => {
     characterId,
     isEmpty,
     loadList,
+    loadListAll,
     open,
     startWith,
     startWithPlayer,

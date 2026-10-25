@@ -7,8 +7,8 @@
           <span class="script__count">{{ events.length }} 幕</span>
         </h2>
         <p class="script__hint">
-          按轮次推进的小剧本：第 3 轮有人推门进来，第 6 轮掏出一张通缉令。 标了「结局」的那一幕演完，
-          这一场就结束。
+          按轮次推进的小剧本：第 3 轮有人推门进来，第 6 轮掏出一张通缉令。
+          标了「结局」的那一幕演完， 这一场就结束。
         </p>
       </div>
 
@@ -267,7 +267,7 @@ async function onImportPicked(event: Event): Promise<void> {
     const parsed: unknown = JSON.parse(await file.text());
     const list = Array.isArray(parsed)
       ? parsed
-      : (parsed as { events?: unknown[] })?.events ?? null;
+      : ((parsed as { events?: unknown[] })?.events ?? null);
     if (!Array.isArray(list) || list.length === 0) {
       error.value = '这个文件里没有剧本（需要 events 数组）';
       return;

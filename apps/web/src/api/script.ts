@@ -1,5 +1,10 @@
 import type { ScriptEvent, ScriptEventInput, ScriptEventPatch } from '@tavern/shared';
-import { SCRIPT_EVENT_ENDPOINT, scriptEventEndpoint, scriptExportEndpoint, scriptImportEndpoint } from '@tavern/shared';
+import {
+  SCRIPT_EVENT_ENDPOINT,
+  scriptEventEndpoint,
+  scriptExportEndpoint,
+  scriptImportEndpoint,
+} from '@tavern/shared';
 import { apiDelete, apiGet, apiPatch, apiPost } from './client';
 
 /**
@@ -31,9 +36,7 @@ export function deleteScriptEvent(id: string): Promise<{ id: string; deleted: bo
 }
 
 /** 导出整份剧本（浏览器里自己组装下载文件）。 */
-export function exportScript(
-  characterId: string,
-): Promise<{ filename: string; bundle: unknown }> {
+export function exportScript(characterId: string): Promise<{ filename: string; bundle: unknown }> {
   return apiGet<{ filename: string; bundle: unknown }>(scriptExportEndpoint(characterId), {
     timeoutMs: 15_000,
   });
