@@ -185,3 +185,10 @@ config/user.yaml     本地覆盖，含 key（gitignore）
 
 课程作业项目。示例角色与头像均为原创（头像由脚本生成），可自由分发；
 社区角色卡的版权归原作者。
+
+## 持续集成
+
+CI 配置在 `docs/ci-workflow.yml`：把它复制到 `.github/workflows/ci.yml` 并提交即可启用
+
+（需要带 `workflow` 权限的 token，或直接在 GitHub 网页上新建该文件）。
+
