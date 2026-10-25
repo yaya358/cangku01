@@ -12,6 +12,9 @@
           <n-button size="small" type="primary" :loading="saving" @click="save">保存</n-button>
         </template>
 
+        <n-button size="small" type="primary" :loading="startingChat" @click="startChat">
+          开始对话
+        </n-button>
         <n-button size="small" @click="previewOpen = true">预览上下文</n-button>
         <n-button size="small" :loading="exporting" @click="downloadPng">导出 PNG</n-button>
         <n-button size="small" :loading="exporting" @click="downloadJson">导出 JSON</n-button>
@@ -225,6 +228,7 @@ import { onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { updateCharacter, exportCardJson, exportCardPngUrl } from '@/api/characters';
 import ContextPreviewDrawer from '@/components/ContextPreviewDrawer.vue';
+import { useChatStore } from '@/stores/chat';
 import { useCharacterStore } from '@/stores/characters';
 import { formatDateTime } from '@/utils/format';
 
@@ -244,6 +248,23 @@ const saving = ref(false);
 const exporting = ref(false);
 /** 上下文预览抽屉 */
 const previewOpen = ref(false);
+/** 正在创建/打开会话 */
+const startingChat = ref(false);
+
+/** 开始对话：有历史会话就进最近一个，没有就新建。 */
+async function startChat(): Promise<void> {
+  const current = character.value;
+  if (!current || startingChat.value) return;
+
+  startingChat.value = true;
+  try {
+    const conversationId = await useChatStore().startWith(current.id);
+    if (conversationId) await router.push(`/conversations/${conversationId}`);
+    else error.value = useChatStore().error;
+  } finally {
+    startingChat.value = false;
+  }
+}
 const editing = ref(false);
 const error = ref<string | null>(null);
 

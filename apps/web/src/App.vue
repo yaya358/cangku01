@@ -29,7 +29,7 @@
         </main>
 
         <footer class="footer">
-          <span>阶段 3 · 角色卡 · v{{ appVersion }}</span>
+          <span>阶段 5 · 聊天与分支 · v{{ appVersion }}</span>
           <span class="footer__sep" aria-hidden="true">|</span>
           <span>Fastify 后端 + Vue3 前端，同仓 pnpm workspace</span>
         </footer>

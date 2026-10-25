@@ -29,6 +29,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '角色详情' },
   },
   {
+    path: '/conversations/:id',
+    name: 'chat',
+    component: () => import('@/views/ChatView.vue'),
+    meta: { title: '对话' },
+  },
+  {
     path: '/playground',
     name: 'playground',
     // 懒加载：试话页只有真要用时才下载，首屏不为它买单
