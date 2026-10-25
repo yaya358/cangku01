@@ -7,7 +7,10 @@
           挑一个人接着说，或者开一段新的。每段对话的记录都在库里，关掉页面也不会丢。
         </p>
       </div>
-      <n-button type="primary" size="small" @click="pickerOpen = true">新对话</n-button>
+      <div class="conv__actions">
+        <n-button size="small" @click="hallOpen = true">开酒馆大厅</n-button>
+        <n-button type="primary" size="small" @click="pickerOpen = true">新对话</n-button>
+      </div>
     </header>
 
     <n-input
@@ -98,6 +101,48 @@
       </ul>
     </n-modal>
 
+    <!-- 酒馆大厅：挑几个角色同时在场 -->
+    <n-modal
+      v-model:show="hallOpen"
+      preset="card"
+      title="酒馆大厅"
+      :style="{ width: '560px', maxWidth: '92vw' }"
+      :bordered="false"
+    >
+      <p class="conv__hint">
+        选几个角色一起在场。他们按轮次轮流接话，你还可以用 @名字 指定谁先说。
+      </p>
+
+      <ul class="picker">
+        <li v-for="character in characters" :key="character.id">
+          <label class="picker__item picker__item--check">
+            <input v-model="hallMembers" type="checkbox" :value="character.id" />
+            <span class="chat-item__avatar">
+              <img :src="avatarOf(character.id)" :alt="character.name" />
+            </span>
+            <span class="picker__main">
+              <span class="picker__name">{{ character.name }}</span>
+              <span class="picker__excerpt">{{ character.excerpt }}</span>
+            </span>
+          </label>
+        </li>
+      </ul>
+
+      <template #footer>
+        <div class="conv__actions conv__actions--end">
+          <n-button size="small" @click="hallOpen = false">取消</n-button>
+          <n-button
+            size="small"
+            type="primary"
+            :disabled="hallMembers.length < 2"
+            @click="openHall"
+          >
+            带 {{ hallMembers.length }} 个人进大厅
+          </n-button>
+        </div>
+      </template>
+    </n-modal>
+
     <!-- 选完角色再定身份：这一场你是谁 -->
     <PlayerIdentityModal
       v-model:show="identityOpen"
@@ -127,6 +172,11 @@ const loading = ref(false);
 const keyword = ref('');
 
 const pickerOpen = ref(false);
+/** 大厅：勾选在场角色 */
+const hallOpen = ref(false);
+const hallMembers = ref<string[]>([]);
+/** 大厅待定的身份提交 */
+const pendingHall = ref(false);
 const identityOpen = ref(false);
 const starting = ref(false);
 /** 选中但要等身份确认的角色 */
@@ -197,9 +247,35 @@ function startWith(character: CharacterSummary): void {
   identityOpen.value = true;
 }
 
+/** 打开大厅：先勾人，再定身份 */
+function openHall(): void {
+  if (hallMembers.value.length < 2) return;
+  pendingHall.value = true;
+  hallOpen.value = false;
+  identityOpen.value = true;
+}
+
 async function onIdentitySubmit(player: Player): Promise<void> {
   const character = pending.value;
-  if (!character || starting.value) return;
+  if (starting.value) return;
+
+  // 大厅模式：成员已经在勾选时定了
+  if (pendingHall.value) {
+    starting.value = true;
+    try {
+      const hallId = await store.startHall(hallMembers.value, player);
+      if (hallId) {
+        identityOpen.value = false;
+        pendingHall.value = false;
+        await router.push(`/conversations/${hallId}`);
+      }
+    } finally {
+      starting.value = false;
+    }
+    return;
+  }
+
+  if (!character) return;
 
   starting.value = true;
   try {
@@ -433,5 +509,24 @@ onMounted(() => {
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.conv__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.conv__actions--end {
+  justify-content: flex-end;
+}
+
+.conv__hint {
+  margin-bottom: 10px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.picker__item--check {
+  gap: 10px;
 }
 </style>

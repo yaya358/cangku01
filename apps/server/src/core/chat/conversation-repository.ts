@@ -24,6 +24,7 @@ interface ConversationRow {
   player_goal: string;
   message_count: number;
   last_content: string | null;
+  hall_members: string;
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +38,20 @@ function toPreview(content: string | null): string {
   return flat.length <= PREVIEW_LENGTH ? flat : `${flat.slice(0, PREVIEW_LENGTH)}…`;
 }
 
+function parseMembers(raw: string | null): { id: string; name: string }[] {
+  try {
+    const parsed: unknown = JSON.parse(raw ?? '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is { id: string; name: string } =>
+        typeof item === 'object' && item !== null && typeof (item as { id?: unknown }).id === 'string',
+      )
+      .map((item) => ({ id: item.id, name: String(item.name ?? '') }));
+  } catch {
+    return [];
+  }
+}
+
 function rowToConversation(row: ConversationRow): Conversation {
   return {
     id: row.id,
@@ -44,6 +59,7 @@ function rowToConversation(row: ConversationRow): Conversation {
     characterName: row.character_name,
     title: row.title,
     activeLeafId: row.active_leaf_id,
+    members: parseMembers(row.hall_members),
     player: {
       name: row.player_name ?? '',
       role: row.player_role ?? '',
@@ -61,6 +77,8 @@ export interface ConversationRepository {
   getById: (id: string) => Conversation | undefined;
   create: (input: CreateConversationInput) => Conversation;
   update: (id: string, patch: UpdateConversationInput) => Conversation | undefined;
+  /** 覆盖大厅成员（创建时补名字用） */
+  setMembers: (id: string, members: { id: string; name: string }[]) => void;
   /** 生成完成写消息后调用，把会话顶到列表最前 */
   touch: (id: string, activeLeafId?: string | null) => void;
   remove: (id: string) => boolean;
@@ -70,7 +88,7 @@ export interface ConversationRepository {
 export function createConversationRepository(db: DatabaseSync): ConversationRepository {
   const baseSelect = `
     SELECT c.id, c.character_id, ch.name AS character_name, c.title, c.active_leaf_id,
-           c.player_name, c.player_role, c.player_goal,
+           c.player_name, c.player_role, c.player_goal, c.hall_members,
            c.created_at, c.updated_at,
            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
            (SELECT m.content FROM messages m WHERE m.conversation_id = c.id
@@ -105,12 +123,13 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
       const now = new Date().toISOString();
       const title = input.title?.trim() || '新的对话';
       const player = input.player ?? {};
+      const members = input.memberIds ?? [];
 
       db.prepare(
         `INSERT INTO conversations (
            id, character_id, title, active_leaf_id,
-           player_name, player_role, player_goal, created_at, updated_at
-         ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+           player_name, player_role, player_goal, hall_members, created_at, updated_at
+         ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.characterId,
@@ -118,6 +137,7 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
         player.name ?? '',
         player.role ?? '',
         player.goal ?? '',
+        JSON.stringify(members.map((id) => ({ id, name: '' }))),
         now,
         now,
       );
@@ -161,6 +181,13 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
       db.prepare(`UPDATE conversations SET ${assignments.join(', ')} WHERE id = ?`).run(...values);
 
       return getById(id);
+    },
+
+    setMembers(id: string, members: { id: string; name: string }[]): void {
+      db.prepare('UPDATE conversations SET hall_members = ? WHERE id = ?').run(
+        JSON.stringify(members),
+        id,
+      );
     },
 
     touch(id: string, activeLeafId?: string | null): void {

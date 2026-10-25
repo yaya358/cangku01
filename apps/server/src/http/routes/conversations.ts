@@ -78,10 +78,27 @@ export function registerConversationRoutes(app: AppInstance): void {
 
     const conversation = app.conversations().create({
       characterId: body.characterId,
-      title: body.title?.trim() || `${character.name}的对话`,
+      title:
+        body.title?.trim() ||
+        (body.memberIds && body.memberIds.length > 0
+          ? '酒馆大厅'
+          : `${character.name}的对话`),
       // 开局就带上身份：之后每一轮都按它组装上下文
       ...(body.player ? { player: body.player } : {}),
+      // 传了 memberIds 就是酒馆大厅：这些角色同时在场
+      ...(body.memberIds && body.memberIds.length > 0 ? { memberIds: body.memberIds } : {}),
     });
+
+    // 大厅：把成员名字补进 hall_members，列表里就不必再查一次角色
+    if (body.memberIds && body.memberIds.length > 0) {
+      const named = body.memberIds
+        .map((memberId) => {
+          const member = app.characters().getById(memberId);
+          return member ? { id: member.id, name: member.name } : null;
+        })
+        .filter((item): item is { id: string; name: string } => item !== null);
+      app.conversations().setMembers(conversation.id, named);
+    }
 
     // 开场白直接落成第一条消息：新会话打开就有内容，不用等用户先说
     const greeting = character.firstMes.trim();
@@ -187,13 +204,31 @@ export function registerConversationRoutes(app: AppInstance): void {
     if (!conversation) throw AppError.notFound(`会话不存在: ${id}`);
 
     const body = parseOrThrow(SendMessageSchema, request.body, '消息参数不合法');
-    const character = app.characters().getById(conversation.characterId);
-    if (!character) throw AppError.notFound('该会话关联的角色已被删除');
+
 
     const provider = resolveProvider(app, body.provider);
     const model = body.model ?? provider.defaultModel;
     const conversationsRepo = app.conversations();
     const messagesRepo = app.messages();
+
+    /**
+     * 大厅模式：谁接话。
+     *
+     *   - 玩家 @ 了谁，谁先说（最直观）
+     *   - 否则按在场顺序轮转，索引取「已有消息数」，让几个角色自然交替
+     */
+    const members = conversation.members;
+    const hallSpeaker =
+      members.length > 0
+        ? (members.find((member) => body.content.includes(`@${member.name}`)) ??
+          members[(messagesRepo.count(id) + 1) % members.length])
+        : null;
+    if (hallSpeaker && !hallSpeaker.name) {
+      hallSpeaker.name = app.characters().getById(hallSpeaker.id)?.name ?? '';
+    }
+
+    const character = app.characters().getById(hallSpeaker?.id ?? conversation.characterId);
+    if (!character) throw AppError.notFound('该会话关联的角色已被删除');
 
     const all = messagesRepo.listByConversation(id);
 
@@ -304,6 +339,7 @@ export function registerConversationRoutes(app: AppInstance): void {
         role: 'assistant',
         content: result.text,
         parentId: userMessage.id,
+        ...(hallSpeaker ? { speakerId: hallSpeaker.id } : {}),
         model,
         provider: provider.meta.name,
         ...(result.usage ? { usage: result.usage } : {}),

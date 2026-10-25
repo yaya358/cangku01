@@ -262,6 +262,20 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'speak'");
     },
   },
+  {
+    version: 10,
+    name: 'hall-members',
+    up: (db) => {
+      /**
+       * 酒馆大厅：一个会话里可以在场多个角色。
+       *
+       * hall_members 存 JSON 数组（角色 id），顺序就是默认接话顺序；
+       * speaker_id 记在消息上，才知道这句是谁说的。
+       */
+      db.exec("ALTER TABLE conversations ADD COLUMN hall_members TEXT NOT NULL DEFAULT '[]'");
+      db.exec('ALTER TABLE messages ADD COLUMN speaker_id TEXT');
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

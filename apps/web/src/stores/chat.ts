@@ -37,6 +37,8 @@ export interface ChatBubble {
   optimistic?: boolean;
   /** 这条是我说的、还是做的、想的（决定气泡样式） */
   kind?: MessageKind;
+  /** 大厅里这条是谁说的 */
+  speakerId?: string | null;
   /** 剧情事件提示（不是消息，只是这一轮发生了什么） */
   notice?: { title: string; turn: number };
   /** 生成元信息，只在助手消息下方显示 */
@@ -81,6 +83,7 @@ export const useChatStore = defineStore('chat', () => {
       role: message.role,
       content: message.content,
       kind: message.kind,
+      speakerId: message.speakerId,
       createdAt: message.createdAt,
       swipes: message.swipes,
       swipeIndex: message.swipeIndex,
@@ -157,6 +160,18 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null;
     try {
       const created = await createConversation(characterId, undefined, player);
+      return created.id;
+    } catch (cause) {
+      error.value = describeError(cause);
+      return null;
+    }
+  }
+
+  /** 开一个酒馆大厅：这些角色同时在场，按轮次或 @ 决定谁接话。 */
+  async function startHall(memberIds: string[], player: Player): Promise<string | null> {
+    error.value = null;
+    try {
+      const created = await createConversation(memberIds[0] ?? '', '酒馆大厅', player, memberIds);
       return created.id;
     } catch (cause) {
       error.value = describeError(cause);
@@ -441,6 +456,7 @@ export const useChatStore = defineStore('chat', () => {
     open,
     startWith,
     startWithPlayer,
+    startHall,
     updatePlayer,
     send,
     regenerate,

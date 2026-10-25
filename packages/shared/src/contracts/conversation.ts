@@ -42,6 +42,8 @@ export const MessageSchema = z.object({
   content: z.string(),
   /** 输入方式：说的 / 做的 / 想的 / 旁白 / 场外 */
   kind: MessageKindSchema,
+  /** 大厅里这句是谁说的（一对一为 null） */
+  speakerId: z.string().nullable(),
   /** 重说的候选内容；空数组表示没有候选（普通消息） */
   swipes: z.array(z.string()),
   /** 当前选中的候选下标 */
@@ -67,6 +69,14 @@ export const PlayerSchema = z.object({
 });
 export type Player = z.infer<typeof PlayerSchema>;
 
+
+/** 大厅里在场的一个角色。 */
+export const ConversationMemberSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+export type ConversationMember = z.infer<typeof ConversationMemberSchema>;
+
 /** 会话（列表用，带统计信息）。 */
 export const ConversationSchema = z.object({
   id: z.string(),
@@ -76,6 +86,8 @@ export const ConversationSchema = z.object({
   title: z.string(),
   /** 当前对话树所在的叶子，恢复上下文时用 */
   activeLeafId: z.string().nullable(),
+  /** 在场角色（大厅模式）；一对一为空数组 */
+  members: z.array(ConversationMemberSchema),
   /** 玩家身份；三项都为空表示没设定 */
   player: PlayerSchema,
   messageCount: z.number().int().nonnegative(),
@@ -86,12 +98,15 @@ export const ConversationSchema = z.object({
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
+
 /** 新建会话。 */
 export const CreateConversationSchema = z.object({
   characterId: z.string().min(1),
   title: z.string().max(120).optional(),
   /** 可选：开局就带上身份 */
   player: PlayerSchema.partial().optional(),
+  /** 传了就开成大厅：这些角色同时在场 */
+  memberIds: z.array(z.string().min(1)).max(8).optional(),
 });
 export type CreateConversationInput = z.infer<typeof CreateConversationSchema>;
 
@@ -109,6 +124,8 @@ export const AppendMessageSchema = z.object({
   content: z.string().max(200_000),
   /** 不传就是「说话」，老调用方不用改 */
   kind: MessageKindSchema.optional(),
+  /** 大厅里这条是谁说的 */
+  speakerId: z.string().optional(),
   parentId: z.string().optional(),
   model: z.string().optional(),
   provider: z.string().optional(),

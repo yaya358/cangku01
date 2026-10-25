@@ -10,6 +10,7 @@ function msg(id: string, parentId: string | null, content: string, at: number): 
     parentId,
     role: id.startsWith('a') ? 'assistant' : 'user',
     kind: 'speak',
+    speakerId: null,
     content,
     swipes: [],
     swipeIndex: 0,

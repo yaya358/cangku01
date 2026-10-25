@@ -100,7 +100,11 @@
         </p>
 
         <template v-else>
-          <p class="bubble__body">
+          <p v-if="bubble.role === 'assistant' && bubble.speakerId" class="bubble__speaker">
+          {{ speakerName(bubble.speakerId) }}
+        </p>
+
+        <p class="bubble__body">
             {{ bubble.content
             }}<span v-if="bubble.pending" class="bubble__caret" aria-hidden="true" />
           </p>
@@ -248,6 +252,11 @@ const INPUT_MODES = [
     hint: '不是角色的台词，是你在跟"导演"说话',
   },
 ];
+
+/** 大厅：从会话成员里取发言人名字 */
+function speakerName(speakerId: string): string {
+  return conversation.value?.members.find((member) => member.id === speakerId)?.name ?? '';
+}
 
 const mode = ref<(typeof INPUT_MODES)[number]['value']>('speak');
 const currentMode = computed(
@@ -764,5 +773,11 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--text-faint);
   font-size: 12px;
+}
+.bubble__speaker {
+  padding: 0 6px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
 }
 </style>

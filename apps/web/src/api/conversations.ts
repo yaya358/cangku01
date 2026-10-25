@@ -32,11 +32,13 @@ export function createConversation(
   characterId: string,
   title?: string,
   player?: Partial<Player>,
+  memberIds?: string[],
 ): Promise<Conversation> {
   return apiPost<Conversation>(CONVERSATIONS_ENDPOINT, {
     characterId,
     ...(title ? { title } : {}),
     ...(player ? { player } : {}),
+    ...(memberIds && memberIds.length > 0 ? { memberIds } : {}),
   });
 }
 
