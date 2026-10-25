@@ -19,6 +19,8 @@ const PRIORITY = {
   system: 950,
   postHistory: 800,
   persona: 700,
+  // 秘密与目的比场景重要：丢了它角色就退回「问一句答一句」
+  motive: 680,
   scenario: 650,
   worldbook: 600,
   summary: 500,
@@ -127,7 +129,45 @@ function collectLayers(input: AssembleInput, charName: string, userName: string)
     );
   }
 
-  // 4. 世界书（阶段 4 后续提交接入；这里先支持传入）
+  /**
+   * 4. 秘密与目的。
+   *
+   * 没有这两项时，角色只会「问一句答一句」；有了它们才有戏：
+   *   - 目的是它的动机，会让它主动试探、讨好、设套
+   *   - 秘密是它的软肋，玩家得追问、给好处、抓住矛盾才能挖出来
+   * 提示词必须写清「绝不主动交代」，否则模型会一开口就把底牌全抖了。
+   */
+  const secret = character.secret?.trim() ?? '';
+  const goal = character.goal?.trim() ?? '';
+  if (secret.length > 0 || goal.length > 0) {
+    const motiveParts: string[] = ['【你心里的事】'];
+    if (goal.length > 0) {
+      motiveParts.push(
+        `你想要：${substitute(goal, charName, userName)}`,
+        '这会驱动你的行为 —— 可以主动试探、示好、转移话题、提条件，不必等对方先开口。',
+      );
+    }
+    if (secret.length > 0) {
+      motiveParts.push(
+        `你隐藏的事：${substitute(secret, charName, userName)}`,
+        '这件事绝不主动说出。只有被直接问到、被证据逼住，或你足够信任对方时，才可以松口；' +
+          '即便如此，也先用回避、反问或半真半假的话挡一挡。',
+      );
+    }
+
+    layers.push(
+      makeLayer({
+        id: 'motive',
+        kind: 'motive',
+        title: '秘密与目的',
+        content: motiveParts.join('\n'),
+        priority: PRIORITY.motive,
+        splittable: false,
+      }),
+    );
+  }
+
+  // 5. 世界书（阶段 4 后续提交接入；这里先支持传入）
   for (const entry of input.worldbook ?? []) {
     layers.push(
       makeLayer({
@@ -281,6 +321,7 @@ function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
         layer.kind === 'system' ||
         layer.kind === 'persona' ||
         layer.kind === 'scenario' ||
+        layer.kind === 'motive' ||
         layer.kind === 'worldbook' ||
         layer.kind === 'summary',
     )

@@ -142,6 +142,8 @@ describe('toV2Card', () => {
     expect(exported.data.tags).toEqual(['酒馆', '日常']);
     expect(exported.data.extensions).toEqual({
       tavern_ai: { exported_by: 'tavern-ai/0.1.0' },
+      // 秘密与目的放在扩展位：社区工具不认也不影响，我们自己能读回来
+      tavern: { secret: '', goal: '' },
     });
   });
 

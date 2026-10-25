@@ -156,6 +156,7 @@ const KIND_LABEL: Record<string, string> = {
   system: '系统',
   persona: '人设',
   scenario: '场景',
+  motive: '秘密目的',
   worldbook: '世界书',
   summary: '摘要',
   history: '历史',
@@ -354,6 +355,10 @@ watch(
 
 .breakdown__fill--scenario {
   background: #b98c5a;
+}
+
+.breakdown__fill--motive {
+  background: #c9603f;
 }
 
 .breakdown__fill--worldbook {

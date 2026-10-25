@@ -18,6 +18,8 @@ export type LayerKind =
   | 'system'
   | 'persona'
   | 'scenario'
+  /** 秘密与目的：让角色有戏、会主动出招 */
+  | 'motive'
   | 'worldbook'
   | 'summary'
   | 'history'
@@ -85,6 +87,10 @@ export interface AssembleInput {
     systemPrompt?: string;
     postHistoryInstructions?: string;
     mesExample?: string;
+    /** 秘密：知道但绝不主动说，玩家试探到足够程度才可能松口 */
+    secret?: string;
+    /** 目的：它想从玩家这里得到什么，决定它会不会主动出招 */
+    goal?: string;
   };
   /** 已有对话（不含本轮输入） */
   history: readonly ChatMessage[];

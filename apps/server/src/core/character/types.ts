@@ -19,6 +19,10 @@ export interface CharacterRow {
   system_prompt: string;
   post_history_instructions: string;
   creator_notes: string;
+  /** 心里知道但不会主动说的事（迁移 5 新增；老库默认为空串） */
+  secret: string;
+  /** 它想从玩家这里得到什么（迁移 5 新增） */
+  goal: string;
   tags: string;
   alternate_greetings: string;
   avatar_file: string | null;
@@ -82,6 +86,8 @@ export function rowToCharacter(row: CharacterRow): Character {
     systemPrompt: row.system_prompt,
     postHistoryInstructions: row.post_history_instructions,
     creatorNotes: row.creator_notes,
+    secret: row.secret ?? '',
+    goal: row.goal ?? '',
     tags: parseStringArray(row.tags),
     alternateGreetings: parseStringArray(row.alternate_greetings),
     avatarUrl: avatarUrlOf(row.id, row.avatar_file),
@@ -117,6 +123,8 @@ export const FIELD_TO_COLUMN = {
   systemPrompt: 'system_prompt',
   postHistoryInstructions: 'post_history_instructions',
   creatorNotes: 'creator_notes',
+  secret: 'secret',
+  goal: 'goal',
   tags: 'tags',
   alternateGreetings: 'alternate_greetings',
 } as const;

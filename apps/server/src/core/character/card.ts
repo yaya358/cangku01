@@ -115,6 +115,13 @@ export function parseCardJson(json: unknown): ParsedCard {
   const rawName = pickText(body, ['name', 'char_name']).trim();
   const name = rawName.length > 0 ? rawName : FALLBACK_NAME;
 
+  /**
+   * 秘密与目的不是社区规范里的字段，我们自己放在 extensions.tavern 下
+   * （V2 规范允许任意扩展），同时也接受顶层直接写 —— 手写卡片时少一层嵌套。
+   */
+  const extensions = isRecord(body.extensions) ? body.extensions : {};
+  const tavernExt = isRecord(extensions.tavern) ? extensions.tavern : {};
+
   const candidate = {
     name: name.slice(0, 80),
     description: pickText(body, ['description', 'char_persona', 'persona']),
@@ -128,6 +135,8 @@ export function parseCardJson(json: unknown): ParsedCard {
       'postHistoryInstructions',
     ]),
     creatorNotes: pickText(body, ['creator_notes', 'creatorNotes', 'creatorcomment']),
+    secret: pickText(body, ['secret']) || pickText(tavernExt, ['secret']),
+    goal: pickText(body, ['goal']) || pickText(tavernExt, ['goal']),
     tags: pickStringArray(body, ['tags']),
     alternateGreetings: pickStringArray(body, ['alternate_greetings', 'alternateGreetings']).map(
       (item) => clip(item),
@@ -146,7 +155,7 @@ export function parseCardJson(json: unknown): ParsedCard {
     input: parsed.data,
     format,
     specVersion,
-    extensions: isRecord(body.extensions) ? body.extensions : {},
+    extensions,
   };
 }
 
@@ -173,7 +182,11 @@ export function toV2Card(character: CharacterInput, appVersion: string): Record<
       tags: character.tags,
       alternate_greetings: character.alternateGreetings,
       character_book: undefined,
-      extensions: { tavern_ai: { exported_by: `tavern-ai/${appVersion}` } },
+      extensions: {
+        tavern_ai: { exported_by: `tavern-ai/${appVersion}` },
+        // 秘密与目的放扩展位：社区工具不认也不影响，我们自己能读回来
+        tavern: { secret: character.secret, goal: character.goal },
+      },
     },
   };
 }

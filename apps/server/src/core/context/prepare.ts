@@ -87,6 +87,8 @@ export function prepareConversationContext(input: PrepareInput): PreparedContext
       systemPrompt: input.character.systemPrompt,
       postHistoryInstructions: input.character.postHistoryInstructions,
       mesExample: input.character.mesExample,
+      secret: input.character.secret,
+      goal: input.character.goal,
     },
     history,
     userInput,

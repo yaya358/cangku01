@@ -154,6 +154,22 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: 'character-secret-goal',
+    up: (db) => {
+      /**
+       * 角色的「秘密」与「目的」。
+       *
+       * 这两个字段是让角色从「被动应答」变成「有戏」的关键：
+       *   secret —— 它心里知道但绝不主动说的事，玩家要试探、套话才能挖出来
+       *   goal   —— 它想从玩家这里得到什么，决定它会主动出招
+       * 老数据留空即可，不影响既有行为。
+       */
+      db.exec("ALTER TABLE characters ADD COLUMN secret TEXT NOT NULL DEFAULT ''");
+      db.exec("ALTER TABLE characters ADD COLUMN goal TEXT NOT NULL DEFAULT ''");
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

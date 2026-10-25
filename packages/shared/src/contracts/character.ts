@@ -39,6 +39,19 @@ const FieldShape = {
   postHistoryInstructions: z.string().max(LONG_TEXT_MAX),
   /** 给作者自己看的备注，不参与 prompt */
   creatorNotes: z.string().max(LONG_TEXT_MAX),
+  /**
+   * 秘密：角色心里知道、但绝不主动说出的事。
+   *
+   * 这是「有戏」的关键 —— 玩家得试探、套话、给好处才能挖出来。
+   * 提示词会明确要求它只在被追问且信任足够时才松口。
+   */
+  secret: z.string().max(LONG_TEXT_MAX),
+  /**
+   * 目的：它想从玩家这里得到什么。
+   *
+   * 有目的的角色会主动出招（试探、讨好、设套），而不是问一句答一句。
+   */
+  goal: z.string().max(LONG_TEXT_MAX),
   tags: z.array(z.string().min(1).max(32)).max(20),
   /** 备选开场白，用户可切换 */
   alternateGreetings: z.array(z.string().max(20_000)).max(20),
@@ -55,6 +68,9 @@ export const CharacterInputSchema = z.strictObject({
   systemPrompt: FieldShape.systemPrompt.default(''),
   postHistoryInstructions: FieldShape.postHistoryInstructions.default(''),
   creatorNotes: FieldShape.creatorNotes.default(''),
+  // 这两个字段可以不传：不传就当没有秘密/目的（老卡片、老调用方都不受影响）
+  secret: FieldShape.secret.optional(),
+  goal: FieldShape.goal.optional(),
   tags: FieldShape.tags.default([]),
   alternateGreetings: FieldShape.alternateGreetings.default([]),
 });
@@ -70,6 +86,8 @@ export const CharacterPatchSchema = z.strictObject({
   systemPrompt: FieldShape.systemPrompt.optional(),
   postHistoryInstructions: FieldShape.postHistoryInstructions.optional(),
   creatorNotes: FieldShape.creatorNotes.optional(),
+  secret: FieldShape.secret.optional(),
+  goal: FieldShape.goal.optional(),
   tags: FieldShape.tags.optional(),
   alternateGreetings: FieldShape.alternateGreetings.optional(),
 });
@@ -89,6 +107,8 @@ export const CharacterSchema = z.object({
   systemPrompt: z.string(),
   postHistoryInstructions: z.string(),
   creatorNotes: z.string(),
+  secret: z.string(),
+  goal: z.string(),
   tags: z.array(z.string()),
   alternateGreetings: z.array(z.string()),
   /** 头像地址；没有头像时为 null（前端显示首字母占位） */

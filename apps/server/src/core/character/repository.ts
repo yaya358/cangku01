@@ -105,10 +105,10 @@ export function createCharacterRepository(db: DatabaseSync): CharacterRepository
       db.prepare(
         `INSERT INTO characters (
           id, name, description, personality, scenario, first_mes, mes_example,
-          system_prompt, post_history_instructions, creator_notes,
+          system_prompt, post_history_instructions, creator_notes, secret, goal,
           tags, alternate_greetings, avatar_file, spec_version, source,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.name,
@@ -120,6 +120,8 @@ export function createCharacterRepository(db: DatabaseSync): CharacterRepository
         input.systemPrompt,
         input.postHistoryInstructions,
         input.creatorNotes,
+        input.secret ?? '',
+        input.goal ?? '',
         JSON.stringify(input.tags),
         JSON.stringify(input.alternateGreetings),
         options.avatarFile ?? null,

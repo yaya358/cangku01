@@ -161,6 +161,71 @@ describe('上下文组装 · 顺序', () => {
   });
 });
 
+describe('上下文组装 · 秘密与目的', () => {
+  it('没有秘密和目的时不产生 motive 层（老角色行为不变）', () => {
+    const context = assembleContext(makeInput());
+    expect(context.layers.some((layer) => layer.kind === 'motive')).toBe(false);
+  });
+
+  it('有目的时单独成层，并要求它主动出招', () => {
+    const context = assembleContext(
+      makeInput({
+        character: {
+          ...makeInput().character,
+          goal: '套出旅人是从哪来的',
+        },
+      }),
+    );
+
+    const motive = context.layers.find((layer) => layer.kind === 'motive');
+    expect(motive).toBeDefined();
+    expect(motive?.content).toContain('套出旅人是从哪来的');
+    expect(motive?.content).toContain('主动');
+  });
+
+  it('秘密带「绝不主动说出」的约束，否则模型会一开口就抖底', () => {
+    const context = assembleContext(
+      makeInput({
+        character: {
+          ...makeInput().character,
+          secret: '他曾经是个通缉犯',
+        },
+      }),
+    );
+
+    const motive = context.layers.find((layer) => layer.kind === 'motive');
+    expect(motive?.content).toContain('他曾经是个通缉犯');
+    expect(motive?.content).toContain('绝不主动说出');
+  });
+
+  it('秘密层比场景更难被裁（丢了它角色就退回被动应答）', () => {
+    const context = assembleContext(
+      makeInput({
+        character: { ...makeInput().character, secret: '他曾经是个通缉犯' },
+      }),
+    );
+
+    const motive = context.layers.find((layer) => layer.kind === 'motive');
+    const scenario = context.layers.find((layer) => layer.kind === 'scenario');
+    expect(motive?.priority ?? 0).toBeGreaterThan(scenario?.priority ?? 0);
+  });
+
+  it('秘密与目的都会进最终的 system 消息', () => {
+    const context = assembleContext(
+      makeInput({
+        character: {
+          ...makeInput().character,
+          secret: '他曾经是个通缉犯',
+          goal: '想找个人听他讲完',
+        },
+      }),
+    );
+
+    expect(context.messages[0]?.content).toContain('他曾经是个通缉犯');
+    expect(context.messages[0]?.content).toContain('想找个人听他讲完');
+  });
+});
+
 describe('上下文组装 · 预算', () => {
   it('预算充足时不裁剪', () => {
     const context = assembleContext(makeInput());

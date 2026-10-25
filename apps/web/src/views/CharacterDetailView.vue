@@ -175,6 +175,41 @@
           <pre v-else class="block__code">{{ character.mesExample || '（未填写）' }}</pre>
         </article>
 
+        <!-- 秘密与目的：让角色从「被动应答」变成「有戏」的两个字段 -->
+        <article class="block">
+          <h2 class="block__title">秘密与目的</h2>
+          <p class="block__note">
+            这两项只给模型看，不会出现在对话里。目的是它的动机 —— 有了它角色会主动试探、提条件，
+            而不是问一句答一句；秘密是它的软肋 —— 你得追问、抓矛盾，它才可能松口。
+          </p>
+
+          <div class="block__sub">
+            <h3 class="block__subtitle">目的（它想从你这里得到什么）</h3>
+            <n-input
+              v-if="editing"
+              v-model:value="form.goal"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              placeholder="想知道眼前这个人是不是来问旧事的；如果是，想先把话头岔开。"
+            />
+            <p v-else class="block__text">{{ character.goal || '（未填写 —— 角色会偏被动）' }}</p>
+          </div>
+
+          <div class="block__sub">
+            <h3 class="block__subtitle">秘密（它绝不主动说出的事）</h3>
+            <n-input
+              v-if="editing"
+              v-model:value="form.secret"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 8 }"
+              placeholder="十四年前他是城里有名的刽子手。"
+            />
+            <p v-else class="block__text">
+              {{ character.secret || '（未填写 —— 角色没有可挖的东西）' }}
+            </p>
+          </div>
+        </article>
+
         <article class="block">
           <h2 class="block__title">提示词覆盖</h2>
           <div class="block__sub">
@@ -328,6 +363,8 @@ const form = ref({
   systemPrompt: '',
   postHistoryInstructions: '',
   creatorNotes: '',
+  secret: '',
+  goal: '',
   tags: '',
   alternateGreetings: '',
 });
@@ -357,6 +394,8 @@ function startEdit(): void {
     systemPrompt: current.systemPrompt,
     postHistoryInstructions: current.postHistoryInstructions,
     creatorNotes: current.creatorNotes,
+    secret: current.secret,
+    goal: current.goal,
     tags: current.tags.join(', '),
     alternateGreetings: current.alternateGreetings.join('\n'),
   };
@@ -401,6 +440,8 @@ async function save(): Promise<void> {
       systemPrompt: form.value.systemPrompt,
       postHistoryInstructions: form.value.postHistoryInstructions,
       creatorNotes: form.value.creatorNotes,
+      secret: form.value.secret,
+      goal: form.value.goal,
       tags: parseTags(form.value.tags),
       alternateGreetings: parseLines(form.value.alternateGreetings),
     });
@@ -687,6 +728,13 @@ onMounted(() => {
   line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.block__note {
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.75;
 }
 
 .block__code {
