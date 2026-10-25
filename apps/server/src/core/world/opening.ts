@@ -107,3 +107,55 @@ export function cleanOpening(raw: string): string {
 
   return text.trim();
 }
+
+/* ------------------------------------------------------------------ *
+ * 新一章的「局面」：章节推进时由世界插进当前场景
+ * ------------------------------------------------------------------ */
+
+export interface ChapterBeatInput {
+  sceneName: string;
+  kind: 'public' | 'private';
+  present: readonly { name: string; busyWith?: string | null }[];
+  /** 刚翻过去的那一章 */
+  chapter: number;
+  title: string;
+  /** 这一章要问出来的问题 */
+  question: string;
+  /** 这一章要问的人 */
+  focusName?: string | null;
+}
+
+export function fallbackChapterBeat(input: ChapterBeatInput): string {
+  const who = input.focusName ?? input.present[0]?.name ?? '有人';
+  return `${input.title}。你要问出来的事是：${input.question}据说${who}知道其中一段。`;
+}
+
+export function buildChapterPrompt(input: ChapterBeatInput): ChatMessage[] {
+  const present =
+    input.present.length > 0
+      ? input.present
+          .map((person) => (person.busyWith ? `${person.name}（${person.busyWith}）` : person.name))
+          .join('、')
+      : '一个人也没有';
+
+  const rules = [
+    '你是一场文字角色扮演里的「世界」，只负责写一小段局面，不写任何人的台词。',
+    `地点：${input.sceneName}${input.kind === 'private' ? '（只有你们两个人）' : '（公开场所）'}`,
+    `在场：${present}`,
+    `玩家刚刚进入《${input.title}》，这一章他要问出来的事是：${input.question}`,
+    input.focusName
+      ? `他最该问的人是${input.focusName}：让${input.focusName}在这段里露出一点「我知道点什么」的痕迹。`
+      : '',
+    '写 1~2 句、不超过 60 字，第三人称，只写看得见听得见的事。',
+    '必须出现一样**跟这个问题有关的实物或痕迹**（一张纸、一道旧疤、被划掉的名字、烧焦的木梁），',
+    '但不要揭晓答案，也不要写玩家的动作和台词。',
+  ]
+    .filter((line) => line.length > 0)
+    .join('\n');
+
+  // 只发一条 system：这个上游在两条 system 相邻时会只返回用量、没有正文
+  return [
+    { role: 'system', content: rules },
+    { role: 'user', content: '写这一小段局面。' },
+  ];
+}

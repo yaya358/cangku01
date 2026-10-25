@@ -22,6 +22,13 @@ export const QuestSchema = z.object({
   /** 第几章 */
   chapter: z.number().int().min(1),
   title: z.string(),
+  /**
+   * 这一章要问出来的那个问题。
+   *
+   * 只写「让某人好感 60」玩家是玩不起来的 —— 主线得是一个**谜面**，
+   * 有具体的人和具体的事，玩家才知道自己要打听什么。
+   */
+  question: z.string(),
   /** 这一章要弄明白什么（给人看的一句话） */
   goal: z.string(),
   status: QuestStatusSchema,

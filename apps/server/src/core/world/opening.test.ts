@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildOpeningPrompt, cleanOpening, fallbackOpening } from './opening.js';
+import {
+  buildChapterPrompt,
+  buildOpeningPrompt,
+  cleanOpening,
+  fallbackChapterBeat,
+  fallbackOpening,
+} from './opening.js';
 
 const base = {
   sceneName: '月灯酒馆',
@@ -64,6 +70,40 @@ describe('清理模型输出', () => {
 
   it('空输出还是空', () => {
     expect(cleanOpening('   ')).toBe('');
+  });
+});
+
+describe('本章局面的提示词', () => {
+  const chapter = {
+    sceneName: '月灯酒馆',
+    kind: 'public' as const,
+    present: [
+      { name: '月灯老板', busyWith: '擦杯子' },
+      { name: '猫', busyWith: null },
+    ],
+    chapter: 3,
+    title: '第三章 · 名单的最后一笔',
+    question: '名单最后一个名字是谁？',
+    focusName: '月灯老板',
+  };
+
+  it('把谜面和该问的人写进去，并要求出现一件跟谜题有关的实物', () => {
+    const [system] = buildChapterPrompt(chapter);
+    expect(system?.content).toContain('名单最后一个名字是谁？');
+    expect(system?.content).toContain('月灯老板');
+    expect(system?.content).toContain('实物或痕迹');
+    expect(system?.content).toContain('不要揭晓答案');
+  });
+
+  it('同样只发一条 system', () => {
+    expect(buildChapterPrompt(chapter).filter((m) => m.role === 'system')).toHaveLength(1);
+  });
+
+  it('兜底文案也把问题说清楚，不能是一句空话', () => {
+    const text = fallbackChapterBeat(chapter);
+    expect(text).toContain('第三章');
+    expect(text).toContain('名单最后一个名字是谁');
+    expect(text).toContain('月灯老板');
   });
 });
 

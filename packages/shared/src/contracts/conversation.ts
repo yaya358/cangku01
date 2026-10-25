@@ -51,6 +51,11 @@ export const MessageSchema = z.object({
    * 单独标出来的用处：界面上要标「他听见了」，轮转时也不能算作「轮到他说话」。
    */
   eavesdrop: z.boolean(),
+  /**
+   * 世界插进对话里的旁白：opening = 进门时那一下，chapter = 进入新一章时的局面。
+   * 这两种都要在界面上单独渲染（不是谁说的话），所以单独标出来。
+   */
+  beat: z.enum(['opening', 'chapter']).nullable(),
   /** 重说的候选内容；空数组表示没有候选（普通消息） */
   swipes: z.array(z.string()),
   /** 当前选中的候选下标 */
@@ -135,6 +140,8 @@ export const AppendMessageSchema = z.object({
   whisper: z.boolean().optional(),
   /** 偷听者的反应（由服务端在判定命中后写入，前端不传） */
   eavesdrop: z.boolean().optional(),
+  /** 世界插的旁白：进门那一下 / 新一章的局面 */
+  beat: z.enum(['opening', 'chapter']).optional(),
   /** 大厅里这条是谁说的 */
   speakerId: z.string().optional(),
   parentId: z.string().optional(),

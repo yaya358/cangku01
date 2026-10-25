@@ -36,14 +36,17 @@ afterEach(() => {
   db.close();
 });
 
-describe('主线模板：一章指着一个人', () => {
+describe('主线模板：一章一个谜面、一章指着一个人', () => {
   it('在场三个人就写三章，每章指名一个人、条件递增', () => {
     const chapters = mainlineFor(cast);
     expect(chapters).toHaveLength(3);
     expect(chapters.map((item) => item.focusCharacterId)).toEqual(['c-boss', 'c-patrol', 'c-cat']);
     expect(chapters.map((item) => item.requiredClues)).toEqual([1, 2, 3]);
     expect(chapters.every((item) => item.requiredAffinity === 60)).toBe(true);
-    expect(chapters[0]!.title).toContain('月灯老板');
+    // 标题是谜面（故事），人物在焦点字段里（谁去问）
+    expect(chapters[0]!.title).toContain('第一章');
+    expect(chapters[0]!.question).toContain('那晚');
+    expect(chapters[1]!.question).toContain('通缉令');
     expect(chapters[0]!.goal).toContain('月灯老板');
   });
 
@@ -72,6 +75,23 @@ describe('主线', () => {
       focusCharacterName: '月灯老板',
     });
     expect(quests[1]!.status).toBe('active');
+  });
+
+  it('老存档缺章时补上，而且避开已经给过情报的人', () => {
+    // 老写法是「一次只开一章」：造一个只有第一章的存档
+    journal.ensureMainline(saveId, cast);
+    db.prepare('DELETE FROM quests WHERE chapter > 1').run();
+    // 第一章已经让老板松过口了
+    journal.addClue({ saveId, content: '名单上最后一个人是他自己', source: '月灯老板' });
+
+    journal.ensureMainline(saveId, cast);
+
+    const quests = journal.listQuests(saveId);
+    expect(quests.map((quest) => quest.chapter)).toEqual([1, 2, 3]);
+    // 补出来的章不能再指着已经松过口的人，否则那章永远过不去
+    expect(quests[1]!.focusCharacterName).not.toBe('月灯老板');
+    expect(quests[2]!.focusCharacterName).not.toBe('月灯老板');
+    expect(quests[1]!.question).toContain('通缉令');
   });
 
   it('当前章是章号最小的未完成章', () => {
@@ -187,6 +207,7 @@ describe('下一步文案', () => {
     saveId,
     chapter: 1,
     title: '第一章',
+    question: '那晚到底发生了什么？',
     goal: '',
     status: 'active' as const,
     focusCharacterId: 'c-patrol',

@@ -79,7 +79,7 @@ describe('迁移 15：旧对话 → 场景', () => {
 
     runMigrations(db);
 
-    expect(LATEST_VERSION).toBe(17);
+    expect(LATEST_VERSION).toBe(18);
 
     const conversation = db
       .prepare('SELECT scene_id FROM conversations WHERE id = ?')
@@ -189,6 +189,57 @@ describe('迁移 15：旧对话 → 场景', () => {
       { id: 'u2', parent_id: 'a1' },
       { id: 'a2', parent_id: 'u2' },
     ]);
+  });
+});
+
+describe('迁移 18：章节谜面与世界旁白', () => {
+  it('给每章补上谜面，未完成的章节顺着新谜面改名', () => {
+    const at = new Date().toISOString();
+    const saveId = 'save-mystery';
+    db.prepare(
+      'INSERT INTO saves (id, name, chapter, created_at, updated_at) VALUES (?, ?, 2, ?, ?)',
+    ).run(saveId, '月灯镇', at, at);
+    const insertQuest = (id: string, chapter: number, status: string, title: string): void => {
+      db.prepare(
+        `INSERT INTO quests (id, save_id, chapter, title, goal, status, required_clues, required_affinity, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '', ?, 1, 60, ?, ?)`,
+      ).run(id, saveId, chapter, title, status, at, at);
+    };
+    insertQuest('q1', 1, 'done', '第一章 · 夜里的动静');
+    insertQuest('q2', 2, 'active', '第二章 · 让夜巡人开口');
+
+    runMigrations(db);
+
+    const rows = db
+      .prepare('SELECT id, chapter, title, question FROM quests ORDER BY chapter ASC')
+      .all() as { id: string; chapter: number; title: string; question: string }[];
+
+    expect(rows[0]!.question).toContain('那晚');
+    expect(rows[1]!.question).toContain('通缉令');
+    // 没演完的那章换成谜面名；已经过去的历史不动
+    expect(rows[0]!.title).toBe('第一章 · 夜里的动静');
+    expect(rows[1]!.title).toBe('第二章 · 那张通缉令');
+  });
+
+  it('老的开场旁白补上 beat 标记', () => {
+    const at = new Date().toISOString();
+    db.prepare(
+      'INSERT INTO saves (id, name, chapter, created_at, updated_at) VALUES (?, ?, 1, ?, ?)',
+    ).run('save-beat', '月灯镇', at, at);
+    db.prepare(
+      "INSERT INTO conversations (id, character_id, title, created_at, updated_at) VALUES ('c1', ?, '酒馆', ?, ?)",
+    ).run(patrolId, at, at);
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, role, kind, content, created_at)
+       VALUES ('m1', 'c1', 'system', 'narrate', '你推门进了酒馆。', ?)`,
+    ).run(at);
+
+    runMigrations(db);
+
+    const row = db.prepare("SELECT beat FROM messages WHERE id = 'm1'").get() as {
+      beat: string | null;
+    };
+    expect(row.beat).toBe('opening');
   });
 });
 

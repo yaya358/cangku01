@@ -20,6 +20,7 @@ interface MessageRow {
   speaker_id: string | null;
   whisper: number;
   eavesdrop: number;
+  beat: string | null;
   content: string;
   swipes: string;
   swipe_index: number;
@@ -67,6 +68,7 @@ function rowToMessage(row: MessageRow): Message {
     speakerId: row.speaker_id ?? null,
     whisper: Number(row.whisper ?? 0) === 1,
     eavesdrop: Number(row.eavesdrop ?? 0) === 1,
+    beat: row.beat === 'opening' || row.beat === 'chapter' ? row.beat : null,
     content: row.content,
     swipes: parseSwipes(row.swipes),
     swipeIndex: row.swipe_index,
@@ -134,10 +136,10 @@ export function createMessageRepository(db: DatabaseSync): MessageRepository {
 
       db.prepare(
         `INSERT INTO messages (
-          id, conversation_id, parent_id, role, kind, speaker_id, whisper, eavesdrop, content,
+          id, conversation_id, parent_id, role, kind, speaker_id, whisper, eavesdrop, beat, content,
           swipes, swipe_index, model, provider, usage, finish_reason, duration_ms,
           first_token_ms, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         conversationId,
@@ -147,6 +149,7 @@ export function createMessageRepository(db: DatabaseSync): MessageRepository {
         input.speakerId ?? null,
         input.whisper ? 1 : 0,
         input.eavesdrop ? 1 : 0,
+        input.beat ?? null,
         input.content,
         swipes,
         input.model ?? null,

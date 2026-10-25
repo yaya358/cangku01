@@ -13,6 +13,7 @@ function msg(id: string, role: Message['role'], extra: Partial<Message> = {}): M
     speakerId: null,
     whisper: false,
     eavesdrop: false,
+    beat: null,
     content: id,
     swipes: [],
     swipeIndex: 0,

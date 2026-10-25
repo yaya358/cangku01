@@ -895,14 +895,15 @@ describe('主线与情报本', () => {
       const journal = response.json().data;
 
       expect(journal.chapter).toBe(1);
-      // 一章指着一个人：第一章就该是老板，进度也按他算
+      // 一章一个谜面 + 一个焦点：标题是故事，人物单独给
       expect(journal.quest).toMatchObject({
         chapter: 1,
         status: 'active',
         focusCharacterId: boss,
         focusCharacterName: '月灯老板',
       });
-      expect(journal.quest.title).toContain('月灯老板');
+      expect(journal.quest.title).toContain('第一章');
+      expect(journal.quest.question).toContain('那晚');
       expect(journal.quests).toHaveLength(2);
       expect(journal.clues).toEqual([]);
       // 还没打过交道的人按初始值 50 算，界面上的条才不会是空的
@@ -932,7 +933,13 @@ describe('主线与情报本', () => {
       const quest = findEvent(frames, 'quest');
       expect(quest).toMatchObject({ chapter: 2, finished: false });
       expect(String(quest?.title)).toContain('第二章');
-      expect(String(quest?.title)).toContain('夜巡人');
+
+      // 新一章不只是报个章号：世界还要在当前场景插一段「局面」
+      const detail = await sceneDetail(app, sceneId);
+      const chapterBeat = detail.messages.find((message: any) => message.beat === 'chapter');
+      expect(chapterBeat).toBeTruthy();
+      expect(chapterBeat.role).toBe('system');
+      expect(String(chapterBeat.content).length).toBeGreaterThan(0);
 
       const journal = (
         await app.inject({ method: 'GET', url: `/api/world/saves/${saveId}/journal` })

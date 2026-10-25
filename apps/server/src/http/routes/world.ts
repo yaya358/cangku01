@@ -20,7 +20,13 @@ import {
 import type { EavesdropListener } from '../../core/world/eavesdrop.js';
 import { describeReachability } from '../../core/world/repository.js';
 import { firstSentence } from '../../core/world/journal.js';
-import { buildOpeningPrompt, cleanOpening, fallbackOpening } from '../../core/world/opening.js';
+import {
+  buildChapterPrompt,
+  buildOpeningPrompt,
+  cleanOpening,
+  fallbackChapterBeat,
+  fallbackOpening,
+} from '../../core/world/opening.js';
 import { buildScoringPrompt, parseScore, SCORE_FAILED_REASON } from '../../core/world/scoring.js';
 import { contentForSpeaker, whisperAudience } from '../../core/world/whisper.js';
 import type { AppInstance } from '../../types/fastify.js';
@@ -345,12 +351,13 @@ export function registerWorldRoutes(app: AppInstance): void {
     }
     if (text.length === 0) text = fallbackOpening(input);
 
-    // 落成 system + narrate：界面按「旁白」渲染，组装上下文时会被过滤，
+    // 落成 system + narrate + beat：界面按「开场」块渲染，组装上下文时会被过滤，
     // 所以另外记一条 fact，让第一句回复知道刚进门时发生了什么。
     const message = app.messages().append(conversation.id, {
       role: 'system',
       content: text,
       kind: 'narrate',
+      beat: 'opening',
     });
     app.conversations().touch(conversation.id, message.id);
     app.scriptEvents().recordFact(conversation.id, 'opening', `你刚进门时：${text}`);
@@ -777,6 +784,62 @@ export function registerWorldRoutes(app: AppInstance): void {
         goal: advancedChapter.next?.goal ?? null,
         finished: advancedChapter.next === null,
       });
+
+      /**
+       * 新一章开场：由世界插一段「局面」进当前场景。
+       *
+       * 只发一句「进入第二章」是没有用的 —— 玩家要的是**这一章该盯住什么**：
+       * 一件跟谜题有关的实物、一个露出破绽的人。这段旁白也要记进事实，
+       * 下一句回复才知道桌上多了一张纸。
+       */
+      if (advancedChapter.next) {
+        const next = advancedChapter.next;
+        const beatInput = {
+          sceneName: scene.name,
+          kind: scene.kind,
+          present: present.map((person) => ({
+            name: app.characters().getById(person.characterId)?.name ?? '某人',
+            busyWith: person.busyWith,
+          })),
+          chapter: next.chapter,
+          title: next.title,
+          question: next.question,
+          focusName: next.focusCharacterName,
+        };
+
+        let beatText = '';
+        try {
+          const provider = resolveProvider(app);
+          const generated = await provider.chat(
+            {
+              model: provider.defaultModel,
+              messages: buildChapterPrompt(beatInput),
+              params: { temperature: 0.85 },
+            },
+            { requestId: request.id },
+          );
+          beatText = cleanOpening(generated.text);
+        } catch (error) {
+          request.log.warn({ err: error }, '章节局面生成失败，使用兜底');
+        }
+        if (beatText.length === 0) beatText = fallbackChapterBeat(beatInput);
+
+        const beatMessage = app.messages().append(conversation.id, {
+          role: 'system',
+          content: beatText,
+          kind: 'narrate',
+          beat: 'chapter',
+          ...(conversation.activeLeafId ? { parentId: conversation.activeLeafId } : {}),
+        });
+        app.conversations().touch(conversation.id, beatMessage.id);
+        app
+          .scriptEvents()
+          .recordFact(
+            conversation.id,
+            `chapter:${beatMessage.id}`,
+            `现在这一章是《${next.title}》，要问出来的事：${next.question}。刚才的局面：${beatText}`,
+          );
+      }
     }
 
     /**

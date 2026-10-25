@@ -13,6 +13,7 @@ function msg(id: string, parentId: string | null, content: string, at: number): 
     speakerId: null,
     whisper: false,
     eavesdrop: false,
+    beat: null,
     content,
     swipes: [],
     swipeIndex: 0,

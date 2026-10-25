@@ -603,6 +603,56 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 18,
+    name: 'quest-question-and-beats',
+    up: (db) => {
+      /**
+       * 主线要有「谜面」，世界要能在对话里插旁白。
+       *
+       * 之前的章节只写了「让某人好感 60」—— 玩起来像一个进度条，不是一件事。
+       * 这一版给每章一句**要问出来的问题**（question），摆在标题下面；
+       * 章节推进时再由世界插一段「本章局面」。
+       *
+       * messages.beat 用来区分世界插的旁白：opening = 进门那一下，chapter = 新一章的局面。
+       * 之前开场是靠「system + narrate」认的，多了新来源之后就必须分得清。
+       */
+      db.exec("ALTER TABLE quests ADD COLUMN question TEXT NOT NULL DEFAULT ''");
+      db.exec('ALTER TABLE messages ADD COLUMN beat TEXT');
+
+      const QUESTIONS: Record<number, string> = {
+        1: '那晚到底发生了什么？',
+        2: '通缉令上写的是谁？',
+        3: '名单最后一个名字是谁？',
+      };
+      const titles: Record<number, string> = {
+        1: '第一章 · 那晚的动静',
+        2: '第二章 · 那张通缉令',
+        3: '第三章 · 名单的最后一笔',
+      };
+
+      const quests = db.prepare('SELECT id, chapter, status FROM quests').all() as unknown as {
+        id: string;
+        chapter: number;
+        status: string;
+      }[];
+      const setQuestion = db.prepare('UPDATE quests SET question = ? WHERE id = ?');
+      const setTitle = db.prepare('UPDATE quests SET title = ? WHERE id = ?');
+
+      for (const quest of quests) {
+        setQuestion.run(QUESTIONS[quest.chapter] ?? '', quest.id);
+        // 还没演完的章节顺着新谜面重命名；已经过去的不动（历史别改名）
+        if (quest.status !== 'done' && titles[quest.chapter]) {
+          setTitle.run(titles[quest.chapter]!, quest.id);
+        }
+      }
+
+      // 老的开场消息补上标记：第 8 步做的开场就是 system + narrate
+      db.exec(
+        "UPDATE messages SET beat = 'opening' WHERE role = 'system' AND kind = 'narrate' AND beat IS NULL",
+      );
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

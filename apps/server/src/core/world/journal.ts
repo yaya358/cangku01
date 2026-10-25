@@ -22,6 +22,7 @@ interface QuestRow {
   save_id: string;
   chapter: number;
   title: string;
+  question: string;
   goal: string;
   status: string;
   required_clues: number;
@@ -50,6 +51,7 @@ export interface CastMember {
 interface QuestTemplate {
   chapter: number;
   title: string;
+  question: string;
   goal: string;
   requiredClues: number;
   requiredAffinity: number;
@@ -57,18 +59,35 @@ interface QuestTemplate {
 }
 
 /**
- * 按在场的人现编一条主线：一章一个人，条件就是「让他松口」。
+ * 三章的谜面。
  *
- * 为什么不做更像样的剧情（通缉令、名单）：那需要 beats 那套条件表，
- * 而情报目前只从「好感跨 60」来 —— 写得再花，玩家还是只能靠聊天推进。
- * 所以先把「每一章都能指着一个人、进度看得懂」做实，比编三段花哨文案有用。
+ * 主线得先是一件事，才谈得上推进：每一章都有一个**具体的问题**要问出来，
+ * 问的对象是这一章指着的那个角色。标题用谜面而不是「让某人开口」——
+ * 后者像任务清单，前者才像故事。
  */
-export function mainlineFor(cast: readonly CastMember[]): QuestTemplate[] {
+const MYSTERIES = [
+  { title: '第一章 · 那晚的动静', question: '那晚到底发生了什么？' },
+  { title: '第二章 · 那张通缉令', question: '通缉令上写的是谁？' },
+  { title: '第三章 · 名单的最后一笔', question: '名单最后一个名字是谁？' },
+] as const;
+
+/**
+ * 按在场的人现编一条主线：一章一个谜面、一章指着一个角色。
+ *
+ * 谜面是固定的三条（这个世界本来就围着「那晚 / 通缉令 / 名单」转），
+ * 指到谁身上则按进场顺序来，并且**跳过已经给过你情报的人** ——
+ * 一个角色只会松口一次，把已经松过口的人指成新的焦点，这一章就永远过不去。
+ */
+export function mainlineFor(
+  cast: readonly CastMember[],
+  usedNames: ReadonlySet<string> = new Set(),
+): QuestTemplate[] {
   if (cast.length === 0) {
     return [
       {
         chapter: 1,
         title: '第一章 · 先找个人说话',
+        question: '这个小镇里还有谁愿意跟你说话？',
         goal: '场景里得先有人 —— 进去说一句，才会有人接',
         requiredClues: 1,
         requiredAffinity: 0,
@@ -77,15 +96,22 @@ export function mainlineFor(cast: readonly CastMember[]): QuestTemplate[] {
     ];
   }
 
-  const chapters = cast.slice(0, 3);
-  return chapters.map((person, index) => ({
-    chapter: index + 1,
-    title: `第${['一', '二', '三'][index] ?? index + 1}章 · 让${person.name}开口`,
-    goal: `让${person.name}愿意跟你说真话（好感到 60，他会松口）`,
-    requiredClues: index + 1,
-    requiredAffinity: 60,
-    focusCharacterId: person.id,
-  }));
+  // 优先用还没松过口的人；全都松过口了就按原顺序轮一遍
+  const fresh = cast.filter((person) => !usedNames.has(person.name));
+  const pool = fresh.length > 0 ? fresh : [...cast];
+
+  return MYSTERIES.slice(0, Math.min(3, cast.length)).map((mystery, index) => {
+    const person = pool[index % pool.length]!;
+    return {
+      chapter: index + 1,
+      title: mystery.title,
+      question: mystery.question,
+      goal: `从${person.name}嘴里问出这件事（好感到 60，他会松口）`,
+      requiredClues: index + 1,
+      requiredAffinity: 60,
+      focusCharacterId: person.id,
+    };
+  });
 }
 
 function toQuest(row: QuestRow, nameOf: (id: string) => string | undefined): Quest {
@@ -94,6 +120,7 @@ function toQuest(row: QuestRow, nameOf: (id: string) => string | undefined): Que
     saveId: row.save_id,
     chapter: row.chapter,
     title: row.title,
+    question: row.question ?? '',
     goal: row.goal,
     status: row.status === 'done' ? 'done' : 'active',
     requiredClues: Number(row.required_clues ?? 1),
@@ -204,14 +231,15 @@ export function createJournalRepository(
     const at = now();
     db.prepare(
       `INSERT INTO quests (
-         id, save_id, chapter, title, goal, status, required_clues, required_affinity,
+         id, save_id, chapter, title, question, goal, status, required_clues, required_affinity,
          focus_character_id, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
     ).run(
       id,
       saveId,
       template.chapter,
       template.title,
+      template.question,
       template.goal,
       template.requiredClues,
       template.requiredAffinity,
@@ -261,8 +289,30 @@ export function createJournalRepository(
 
   return {
     ensureMainline(saveId: string, cast: readonly CastMember[]): void {
-      if (listQuests(saveId).length > 0) return;
-      for (const template of mainlineFor(cast)) insertQuest(saveId, template);
+      /**
+       * 补齐缺的章节，而不是「有一章就什么都不做」。
+       *
+       * 老存档是按「一次只开一章」的方式长出来的（推进时才插入下一章），
+       * 现在的写法是整条主线一次写进库；两种数据混在一起时，
+       * 这里就负责把缺的章补上，不然推进到最后一章会直接「演完了」。
+       */
+      const quests = listQuests(saveId);
+      // 第一次写主线时还没有「已经给过情报的人」这回事；
+      // 只有补章时才需要避开他们（一个角色只会松口一次）
+      const used =
+        quests.length === 0
+          ? new Set<string>()
+          : new Set(
+              listClues(saveId)
+                .map((clue) => clue.source)
+                .filter((source): source is string => !!source),
+            );
+      const existing = new Set(quests.map((quest) => quest.chapter));
+
+      for (const template of mainlineFor(cast, used)) {
+        if (existing.has(template.chapter)) continue;
+        insertQuest(saveId, template);
+      }
     },
 
     listQuests,

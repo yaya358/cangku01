@@ -48,6 +48,18 @@
     </n-alert>
 
     <template v-else-if="scene">
+      <!-- 第一次进来的人需要四句话说明白「这游戏怎么玩」 -->
+      <div v-if="showGuide" class="guide">
+        <p class="guide__head">第一次进月灯镇？四句话就够</p>
+        <ol class="guide__steps">
+          <li>在下面说话，<b>在场的人</b>会接 —— 用 @名字 指定谁先说。</li>
+          <li>左栏「找」的那个人是这一章的关键：把他的<b>好感聊到 60</b>，他会松口。</li>
+          <li>松口说的话会进<b>右栏情报本</b>；情报凑够、这一章就翻过去。</li>
+          <li>这一章<b>要问出来的事</b>写在左栏标题下面 —— 那就是你现在的目的。</li>
+        </ol>
+        <button class="tool" type="button" @click="dismissGuide">知道了，开始</button>
+      </div>
+
       <div class="scene__body">
         <!-- 左：主线。你此刻要弄明白什么、该去找谁 -->
         <aside class="side side--left">
@@ -55,6 +67,12 @@
           <template v-if="journal?.quest">
             <p class="quest__chapter">第 {{ journal.chapter }} 章</p>
             <p class="quest__title">{{ journal.quest.title }}</p>
+
+            <!-- 这一章要问出来的事：主线得先是一个问题，才谈得上推进 -->
+            <p v-if="journal.quest.question" class="quest__question">
+              {{ journal.quest.question }}
+            </p>
+
             <p v-if="focusName" class="quest__focus">找：{{ focusName }}</p>
             <p class="quest__progress">
               情报 {{ journal.progress?.clues ?? 0 }}/{{ journal.progress?.needed ?? 0 }}
@@ -70,7 +88,7 @@
               {{ journal.progress.nextStep }}
             </p>
 
-            <!-- 不知道说什么时，至少先把「对谁说」摆好 -->
+            <!-- 不知道说什么时，至少把「找谁、往哪个方向问」摆好 -->
             <div v-if="focusName" class="quest__actions">
               <button
                 class="tool"
@@ -89,6 +107,16 @@
                 @click="addressFocus(true)"
               >
                 低声问
+              </button>
+              <button
+                v-if="journal.quest.question"
+                class="tool tool--hot"
+                type="button"
+                :disabled="streaming"
+                title="把这一章要问的事直接递到嘴边"
+                @click="addressFocus(false, true)"
+              >
+                问这件事
               </button>
             </div>
           </template>
@@ -175,15 +203,17 @@
                 {
                   'bubble--optimistic': bubble.optimistic,
                   'bubble--notice': bubble.notice,
-                  'bubble--opening': bubble.opening,
+                  'bubble--opening': Boolean(bubble.beat),
                   'bubble--whisper': bubble.whisper,
                   'bubble--eavesdrop': bubble.eavesdrop,
                 },
               ]"
             >
-              <!-- 开场 beat：你进门时世界里发生的那一下 -->
-              <p v-if="bubble.opening" class="opening">
-                <span class="opening__head">开场</span>
+              <!-- 开场 / 本章局面：世界插进来的旁白，不是谁说的话 -->
+              <p v-if="bubble.beat" class="opening" :class="`opening--${bubble.beat}`">
+                <span class="opening__head">{{
+                  bubble.beat === 'chapter' ? '本章局面' : '开场'
+                }}</span>
                 <span class="opening__body">{{ bubble.content }}</span>
               </p>
 
@@ -444,14 +474,29 @@ function toggleClue(clueId: string): void {
  * 「不知道说什么」时最省事的一步：先把 @他 填进输入框。
  *
  * 不替玩家写台词 —— 那会让这一场变成念稿；只解决「对谁说」和「用什么音量说」。
+ * withQuestion 会把这一章要问的事作为引子放进去（「我想问一件事：」），
+ * 剩下的还是玩家自己说。
  */
-async function addressFocus(whisper: boolean): Promise<void> {
+async function addressFocus(whisper: boolean, withQuestion = false): Promise<void> {
   const name = focusName.value;
   if (!name) return;
-  draft.value = `@${name} `;
+  draft.value = withQuestion ? `@${name} 我想问一件事：` : `@${name} `;
   mode.value = whisper ? 'whisper' : 'speak';
   await nextTick();
   draftRef.value?.focus();
+}
+
+/** 新手引导：只在第一次进世界里出现，点过就不再打扰 */
+const GUIDE_KEY = 'tavern.world.guide.v1';
+const showGuide = ref(false);
+
+function dismissGuide(): void {
+  showGuide.value = false;
+  try {
+    window.localStorage.setItem(GUIDE_KEY, '1');
+  } catch {
+    // 隐私模式下存不了，下次还会出现，不算错误
+  }
 }
 
 function avatarOf(characterId: string): string {
@@ -560,6 +605,12 @@ watch(
 );
 
 onMounted(() => {
+  try {
+    showGuide.value = window.localStorage.getItem(GUIDE_KEY) !== '1';
+  } catch {
+    // 读不到存储就当看过了，不打扰
+    showGuide.value = false;
+  }
   void store.open(String(route.params.id ?? ''));
 });
 
@@ -624,6 +675,61 @@ onBeforeUnmount(() => {
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.8;
+}
+
+/* 新手引导：第一次进来只有这一屏会看到，看完就不再出现 */
+.guide {
+  display: flex;
+  padding: 14px 16px;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid rgba(224, 167, 94, 0.4);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(224, 167, 94, 0.12), transparent 60%), var(--bg-soft);
+}
+
+.guide__head {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.guide__steps {
+  display: flex;
+  margin: 0;
+  padding-left: 18px;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.guide__steps b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.guide .tool {
+  align-self: flex-start;
+}
+
+/* 这一章要问出来的事：主线里最该被看见的一句 */
+.quest__question {
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(224, 167, 94, 0.1);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+/* 「问这件事」是主动作，给它一点存在感 */
+.tool--hot {
+  border-color: rgba(224, 167, 94, 0.5);
+  background: rgba(224, 167, 94, 0.1);
+  color: var(--accent);
 }
 
 /* 三栏：主线 | 现场 | 情报本 + 好感 */
@@ -990,6 +1096,13 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
   line-height: 1.85;
   white-space: pre-wrap;
+}
+
+/* 本章局面比开场更「有事」：实线边框，让人一眼认出这是新的目标 */
+.opening--chapter {
+  border-style: solid;
+  border-color: rgba(224, 167, 94, 0.4);
+  background: rgba(224, 167, 94, 0.08);
 }
 
 .bubble__body {

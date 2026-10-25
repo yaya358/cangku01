@@ -52,8 +52,8 @@ export interface SceneBubble {
   optimistic?: boolean;
   /** 剧情事件提示（不是消息，只是这一轮发生了什么） */
   notice?: { title: string; turn: number };
-  /** 开场 beat：世界在你进门时说的那一段 */
-  opening?: boolean;
+  /** 世界插的旁白：opening = 进门那一下，chapter = 新一章的局面 */
+  beat?: 'opening' | 'chapter' | null;
   meta?: {
     durationMs?: number | null;
     totalTokens?: number | null;
@@ -70,8 +70,7 @@ function toBubble(message: Message): SceneBubble {
     speakerId: message.speakerId,
     whisper: message.whisper,
     eavesdrop: message.eavesdrop,
-    // 开场落库时用的是 system + narrate：刷新回来还能认出它
-    opening: message.role === 'system' && message.kind === 'narrate',
+    beat: message.beat,
     meta: {
       durationMs: message.durationMs,
       totalTokens: message.usage?.totalTokens ?? null,
@@ -241,9 +240,10 @@ export const useSceneStore = defineStore('scene', () => {
     };
   }
 
-  /** 这一章过去了：章节、章节列表、进度都变了，重新拉一次最省事。 */
+  /** 这一章过去了：章节变了，局面旁白也刚写进对话 —— 两样都刷新。 */
   function applyQuest(): void {
     void loadJournal();
+    void refresh({ messages: true });
   }
 
   async function open(id: string): Promise<void> {
@@ -288,7 +288,7 @@ export const useSceneStore = defineStore('scene', () => {
           content: beat.text,
           createdAt: new Date().toISOString(),
           kind: 'narrate',
-          opening: true,
+          beat: 'opening',
         },
         ...messages.value,
       ];
