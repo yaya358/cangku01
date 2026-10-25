@@ -63,6 +63,8 @@
           <n-button size="small" :loading="starting === card.theme.id" @click="start(card)">
             {{ card.save ? '再开一本' : '开局' }}
           </n-button>
+          <!-- 每个世界自己的存档 / 读档 / 重开 -->
+          <WorldActions v-if="card.save" :save="card.save" @changed="load" />
         </div>
       </article>
     </div>
@@ -78,6 +80,7 @@ import { WORLD_THEMES, characterAvatarEndpoint } from '@tavern/shared';
 import { fetchCharacters } from '@/api/characters';
 import { createSave, listAllScenes, listSaves } from '@/api/world';
 import type { SceneListItem } from '@/api/world';
+import WorldActions from '@/components/WorldActions.vue';
 import { describeError } from '@/utils/errors';
 
 const router = useRouter();

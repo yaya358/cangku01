@@ -666,6 +666,30 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("ALTER TABLE saves ADD COLUMN theme TEXT NOT NULL DEFAULT 'moonlight'");
     },
   },
+  {
+    version: 20,
+    name: 'save-snapshots',
+    up: (db) => {
+      /**
+       * 手动存档 / 读档。
+       *
+       * 一本故事的全部状态（场景、在场、对话、消息、事实、主线、情报、好感）
+       * 整包塞进 payload —— 逐表 diff 太容易漏，新加一张表就少存一样。
+       */
+      db.exec(`
+        CREATE TABLE save_snapshots (
+          id            TEXT PRIMARY KEY,
+          save_id       TEXT NOT NULL REFERENCES saves (id) ON DELETE CASCADE,
+          label         TEXT NOT NULL DEFAULT '',
+          chapter       INTEGER NOT NULL DEFAULT 1,
+          message_count INTEGER NOT NULL DEFAULT 0,
+          created_at    TEXT NOT NULL,
+          payload       TEXT NOT NULL
+        )
+      `);
+      db.exec('CREATE INDEX idx_snapshots_save ON save_snapshots (save_id, created_at DESC)');
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

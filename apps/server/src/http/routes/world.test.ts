@@ -955,6 +955,106 @@ describe('世界包：换题材', () => {
   });
 });
 
+describe('存档快照：存档 / 读档', () => {
+  it('存一张快照，聊两句，再读回去：消息和好感都回到存的那时候', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板', {
+        secret: '名单上最后一个人是他自己。他巡夜，是因为不敢睡。',
+      });
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      await speak(app, sceneId, '先来一杯。');
+      // 记下快照那一刻的好感（第一轮已经打过分了）
+      const affinityThen = (
+        await app.inject({ method: 'GET', url: `/api/world/saves/${saveId}/affinity` })
+      ).json().data;
+
+      const snapshot = await app.inject({
+        method: 'POST',
+        url: `/api/world/saves/${saveId}/snapshots`,
+        payload: { label: '存一下' },
+      });
+      expect(snapshot.statusCode).toBe(200);
+      const saved = snapshot.json().data;
+      expect(saved).toMatchObject({ saveId, label: '存一下', chapter: 1 });
+      expect(saved.messageCount).toBeGreaterThan(0);
+
+      // 再聊一轮、把好感推上去：快照之后的变化应该被读档抹掉
+      app.affinity().apply(saveId, boss, 9, '（用例安排）');
+      await speak(app, sceneId, '我替你把这件事瞒下来。');
+      const before = await sceneDetail(app, sceneId);
+      expect(before.messages.length).toBeGreaterThan(saved.messageCount);
+
+      const restored = await app.inject({
+        method: 'POST',
+        url: `/api/world/snapshots/${saved.id}/restore`,
+      });
+      expect(restored.statusCode).toBe(200);
+      expect(restored.json().data).toMatchObject({ saveId, chapter: 1 });
+
+      const after = await sceneDetail(app, sceneId);
+      expect(after.messages.length).toBe(saved.messageCount);
+
+      const affinity = await app.inject({
+        method: 'GET',
+        url: `/api/world/saves/${saveId}/affinity`,
+      });
+      expect(affinity.json().data).toEqual(affinityThen);
+
+      // 读档之后还能接着聊（外键没被写坏）
+      const frames = await speak(app, sceneId, '我们继续。');
+      expect(frames.some((frame) => frame.type === 'done')).toBe(true);
+    });
+  });
+
+  it('快照列表按时间倒序，能删', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId } = await seedSave(app, '月灯镇', [boss]);
+
+      await app.inject({
+        method: 'POST',
+        url: `/api/world/saves/${saveId}/snapshots`,
+        payload: { label: '第一张' },
+      });
+      const second = await app.inject({
+        method: 'POST',
+        url: `/api/world/saves/${saveId}/snapshots`,
+        payload: { label: '第二张' },
+      });
+
+      const list = (
+        await app.inject({ method: 'GET', url: `/api/world/saves/${saveId}/snapshots` })
+      ).json().data;
+      expect(list.map((item: { label: string }) => item.label)).toEqual(['第二张', '第一张']);
+
+      const removed = await app.inject({
+        method: 'DELETE',
+        url: `/api/world/snapshots/${list[1].id}`,
+      });
+      expect(removed.statusCode).toBe(200);
+
+      const after = (
+        await app.inject({ method: 'GET', url: `/api/world/saves/${saveId}/snapshots` })
+      ).json().data;
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe(second.json().data.id);
+    });
+  });
+
+  it('不存在的快照：读档和删除都是 404', async () => {
+    await withApp(async ({ app }) => {
+      const restore = await app.inject({
+        method: 'POST',
+        url: '/api/world/snapshots/missing/restore',
+      });
+      expect(restore.statusCode).toBe(404);
+      const removed = await app.inject({ method: 'DELETE', url: '/api/world/snapshots/missing' });
+      expect(removed.statusCode).toBe(404);
+    });
+  });
+});
+
 describe('好感度', () => {
   it('每轮结束打一次分，并把变化写进库', async () => {
     await withApp(async ({ app, scoreCalls }) => {

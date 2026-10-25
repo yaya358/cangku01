@@ -11,6 +11,7 @@ import {
   themeById,
   WORLD_SAVES_ENDPOINT,
   WORLD_SCENES_ENDPOINT,
+  WORLD_SNAPSHOTS_ENDPOINT,
 } from '@tavern/shared';
 import { affinityMood } from '@tavern/shared';
 import { z } from 'zod';
@@ -246,6 +247,49 @@ export function registerWorldRoutes(app: AppInstance): void {
     for (const characterId of cast) app.world().enter(scene.id, characterId, 1, null);
 
     return success(request.id, { save: created, scene });
+  });
+
+  /**
+   * 手动存档：给这本故事拍一张快照。
+   *
+   * 快照和「多个存档」是两件事：存档分的是世界，快照分的是同一本世界里的时间点。
+   */
+  app.post(`${WORLD_SAVES_ENDPOINT}/:id/snapshots`, async (request) => {
+    const { id } = request.params as { id: string };
+    const save = app.world().getSave(id);
+    if (!save) throw AppError.notFound(`存档不存在: ${id}`);
+
+    const body = parseOrThrow(
+      z.object({ label: z.string().max(60).optional() }),
+      request.body ?? {},
+      '快照参数不合法',
+    );
+    const clock = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const label = body.label?.trim() || `第 ${save.chapter} 章 · ${clock}`;
+
+    return success(request.id, app.snapshots().create(id, label));
+  });
+
+  /** 快照列表（新的在前）。 */
+  app.get(`${WORLD_SAVES_ENDPOINT}/:id/snapshots`, async (request) => {
+    const { id } = request.params as { id: string };
+    if (!app.world().getSave(id)) throw AppError.notFound(`存档不存在: ${id}`);
+    return success(request.id, app.snapshots().list(id));
+  });
+
+  /** 读档：回到快照那一刻（当前进度会被覆盖）。 */
+  app.post(`${WORLD_SNAPSHOTS_ENDPOINT}/:snapshotId/restore`, async (request) => {
+    const { snapshotId } = request.params as { snapshotId: string };
+    const restored = app.snapshots().restore(snapshotId);
+    if (!restored) throw AppError.notFound(`快照不存在: ${snapshotId}`);
+    return success(request.id, restored);
+  });
+
+  /** 删掉一张快照。 */
+  app.delete(`${WORLD_SNAPSHOTS_ENDPOINT}/:snapshotId`, async (request) => {
+    const { snapshotId } = request.params as { snapshotId: string };
+    if (!app.snapshots().remove(snapshotId)) throw AppError.notFound(`快照不存在: ${snapshotId}`);
+    return success(request.id, { deleted: true, snapshotId });
   });
 
   /** 删掉一个存档。删了就真没了 —— 对话、场景、主线、好感一起走。 */

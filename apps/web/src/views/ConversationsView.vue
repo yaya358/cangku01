@@ -36,24 +36,39 @@
       —— 挑几个人同场轮流接话，等价于「进一个场景」，保留是为了兼容旧记录。
     </p>
 
-    <!-- 场景：世界模式的入口。按世界分组 —— 四个题材的场景混在一张表里太乱 -->
+    <!-- 场景：一次只看一个世界 —— 四个题材的场景混在一张表里太乱 -->
     <section v-if="sceneGroups.length > 0" class="scenes">
       <div class="scenes__head">
         <h2 class="scenes__title">场景</h2>
-        <span class="scenes__hint">按世界分开；点进去就是那个地方 —— 在场的人才会接你的话</span>
+        <span class="scenes__hint">一次一个世界；点进去就是那个地方 —— 在场的人才会接你的话</span>
       </div>
 
-      <div v-for="group in sceneGroups" :key="group.saveId" class="scene-group">
+      <!-- 世界切换：一本书一枚 -->
+      <div class="world-tabs">
+        <button
+          v-for="group in sceneGroups"
+          :key="group.saveId"
+          class="world-tab"
+          :class="{ 'world-tab--on': group.saveId === activeSaveId }"
+          type="button"
+          @click="activeSaveId = group.saveId"
+        >
+          <span class="world-tab__name">{{ group.saveName }}</span>
+          <span class="world-tab__meta">第 {{ group.chapter }} 章</span>
+        </button>
+      </div>
+
+      <div v-if="activeGroup" class="scene-group">
         <div class="scene-group__head">
-          <span class="scene-group__name">{{ group.saveName }}</span>
-          <span class="scene-group__theme">{{ group.themeName }}</span>
-          <span class="scene-group__meta">
-            第 {{ group.chapter }} 章 · {{ group.scenes.length }} 个场景
-          </span>
+          <span class="scene-group__name">{{ activeGroup.saveName }}</span>
+          <span class="scene-group__theme">{{ activeGroup.themeName }}</span>
+          <span class="scene-group__meta"> {{ activeGroup.scenes.length }} 个场景 </span>
+          <!-- 这个世界的存档 / 读档 / 重开 -->
+          <WorldActions class="scene-group__actions" :save="activeSave" @changed="loadScenes" />
         </div>
 
         <ul class="scene-list">
-          <li v-for="item in group.scenes" :key="item.id">
+          <li v-for="item in activeGroup.scenes" :key="item.id">
             <RouterLink class="scene-item" :to="`/scenes/${item.id}`">
               <span class="scene-item__badge" :class="`scene-item__badge--${item.kind}`">
                 {{ item.kind === 'private' ? '私聊' : '公开' }}
@@ -222,7 +237,7 @@
 import type { CharacterSummary, Conversation, Player, Save } from '@tavern/shared';
 import { characterAvatarEndpoint, themeById } from '@tavern/shared';
 import { NAlert, NButton, NInput, NModal, NSpin } from 'naive-ui';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { fetchCharacters } from '@/api/characters';
 import { ensureDefaultScene, listAllScenes, listSaves } from '@/api/world';
@@ -231,6 +246,7 @@ import { useChatStore } from '@/stores/chat';
 import { describeError } from '@/utils/errors';
 import PlayerIdentityModal from '@/components/PlayerIdentityModal.vue';
 import SavePanel from '@/components/SavePanel.vue';
+import WorldActions from '@/components/WorldActions.vue';
 
 const router = useRouter();
 const store = useChatStore();
@@ -335,7 +351,7 @@ async function loadScenes(): Promise<void> {
  * 场景按世界分组。
  *
  * 四个题材的场景混在一张表里，看起来就是「喜堂」「货舱层」「旧图书室」「酒馆」
- * 乱七八糟排一排 —— 玩家分不清哪几个是自己的。分组之后一个世界一块。
+ * 乱七八糟排一排 —— 玩家分不清哪几个是自己的。分组之后一次只看一个世界。
  */
 const sceneGroups = computed(() => {
   const groups = new Map<
@@ -382,6 +398,31 @@ const sceneGroups = computed(() => {
         items.reduce((latest, item) => (item.updatedAt > latest ? item.updatedAt : latest), '');
       return newest(right.scenes) > newest(left.scenes) ? 1 : -1;
     });
+});
+
+/**
+ * 当前正在看的世界：切过就记住，没切过就默认最近有动静的那个。
+ *
+ * 之前四个世界的场景全列在一张表里，玩家的原话是「看着多乱」。
+ */
+const activeSaveId = ref<string | null>(null);
+
+const activeGroup = computed(() => {
+  const groups = sceneGroups.value;
+  if (groups.length === 0) return null;
+  return groups.find((group) => group.saveId === activeSaveId.value) ?? groups[0]!;
+});
+
+const activeSave = computed<Save | null>(() => {
+  const group = activeGroup.value;
+  if (!group) return null;
+  return saves.value.find((save) => save.id === group.saveId) ?? null;
+});
+
+watch(sceneGroups, (groups) => {
+  if (groups.length === 0) return;
+  const known = groups.some((group) => group.saveId === activeSaveId.value);
+  if (!known) activeSaveId.value = groups[0]!.saveId;
 });
 
 function startWith(character: CharacterSummary): void {
@@ -783,6 +824,56 @@ onMounted(() => {
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 10.5px;
+}
+
+/* 世界切换：一本书一枚，选中那个高亮 */
+.world-tabs {
+  display: flex;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.world-tab {
+  display: inline-flex;
+  padding: 4px 10px;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.world-tab:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.world-tab--on {
+  border-color: rgba(224, 167, 94, 0.55);
+  background: rgba(224, 167, 94, 0.1);
+  color: var(--accent);
+}
+
+.world-tab__name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.world-tab__meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.scene-group__actions {
+  margin-left: auto;
 }
 
 .scene-list {

@@ -1,5 +1,6 @@
 import type {
   Affinity,
+  Snapshot,
   ChatStreamPayload,
   CreateSaveInput,
   Journal,
@@ -7,6 +8,7 @@ import type {
   PrivateSceneResult,
   Save,
   SaveStarted,
+  SnapshotRestoreResult,
   Scene,
   SceneDetail,
   SceneOpening,
@@ -19,6 +21,9 @@ import {
   worldSaveJournalEndpoint,
   worldSaveRestartEndpoint,
   worldSaveScenesEndpoint,
+  worldSaveSnapshotsEndpoint,
+  worldSnapshotEndpoint,
+  worldSnapshotRestoreEndpoint,
   worldSceneEndpoint,
   worldSceneOpeningEndpoint,
   worldScenePrivateEndpoint,
@@ -76,6 +81,25 @@ export function restartSave(saveId: string): Promise<SaveStarted> {
   return apiPost<SaveStarted>(worldSaveRestartEndpoint(saveId), {});
 }
 
+/** 手动存档：给这本故事拍一张快照 */
+export function createSnapshot(saveId: string, label?: string): Promise<Snapshot> {
+  return apiPost<Snapshot>(worldSaveSnapshotsEndpoint(saveId), label ? { label } : {});
+}
+
+/** 这个存档存过哪些快照（新的在前） */
+export function listSnapshots(saveId: string): Promise<Snapshot[]> {
+  return apiGet<Snapshot[]>(worldSaveSnapshotsEndpoint(saveId));
+}
+
+/** 读档：回到快照那一刻 */
+export function restoreSnapshot(snapshotId: string): Promise<SnapshotRestoreResult> {
+  return apiPost<SnapshotRestoreResult>(worldSnapshotRestoreEndpoint(snapshotId), {});
+}
+
+/** 删掉一张快照 */
+export function deleteSnapshot(snapshotId: string): Promise<{ deleted: boolean }> {
+  return apiDelete<{ deleted: boolean }>(worldSnapshotEndpoint(snapshotId));
+}
 /** 删除一个存档（连同它的场景、对话、主线一起）。 */
 export function removeSave(saveId: string): Promise<{ deleted: boolean }> {
   return apiDelete<{ deleted: boolean }>(worldSaveEndpoint(saveId));

@@ -48,6 +48,24 @@ export const SaveStartedSchema = z.object({
 });
 export type SaveStarted = z.infer<typeof SaveStartedSchema>;
 
+/** 快照：手动存下来的一刻，可以读回去。 */
+export const SnapshotSchema = z.object({
+  id: z.string(),
+  saveId: z.string(),
+  label: z.string(),
+  chapter: z.number().int().nonnegative(),
+  /** 快照里有多少条对话 —— 界面用来区分「存得早还是晚」 */
+  messageCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+});
+export type Snapshot = z.infer<typeof SnapshotSchema>;
+
+export const SnapshotRestoreResultSchema = z.object({
+  saveId: z.string(),
+  chapter: z.number().int().nonnegative(),
+});
+export type SnapshotRestoreResult = z.infer<typeof SnapshotRestoreResultSchema>;
+
 /**
  * 能不能联系上这个人。
  *

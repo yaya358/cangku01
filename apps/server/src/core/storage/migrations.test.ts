@@ -79,7 +79,7 @@ describe('迁移 15：旧对话 → 场景', () => {
 
     runMigrations(db);
 
-    expect(LATEST_VERSION).toBe(19);
+    expect(LATEST_VERSION).toBe(20);
 
     const conversation = db
       .prepare('SELECT scene_id FROM conversations WHERE id = ?')

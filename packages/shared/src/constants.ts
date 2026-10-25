@@ -108,6 +108,9 @@ export function messageRegenerateEndpoint(id: string): string {
  */
 export const WORLD_SAVES_ENDPOINT = `${API_PREFIX}/world/saves`;
 
+/** 快照本身不在 saves 下面（读档/删档时只有一个快照 id，不知道属于哪本书） */
+export const WORLD_SNAPSHOTS_ENDPOINT = `${API_PREFIX}/world/snapshots`;
+
 /** 某存档下的场景集合。 */
 export function worldSaveScenesEndpoint(saveId: string): string {
   return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}/scenes`;
@@ -121,6 +124,20 @@ export function worldSaveEndpoint(saveId: string): string {
 /** 重新开始：名字和在场的人留住，进度全部清空 */
 export function worldSaveRestartEndpoint(saveId: string): string {
   return `${worldSaveEndpoint(saveId)}/restart`;
+}
+
+/** 手动存档：这个存档的快照列表（GET 列表 / POST 新建） */
+export function worldSaveSnapshotsEndpoint(saveId: string): string {
+  return `${worldSaveEndpoint(saveId)}/snapshots`;
+}
+
+/** 读档 / 删档：针对某一张快照 */
+export function worldSnapshotRestoreEndpoint(snapshotId: string): string {
+  return `${WORLD_SNAPSHOTS_ENDPOINT}/${encodeURIComponent(snapshotId)}/restore`;
+}
+
+export function worldSnapshotEndpoint(snapshotId: string): string {
+  return `${WORLD_SNAPSHOTS_ENDPOINT}/${encodeURIComponent(snapshotId)}`;
 }
 
 /** 某存档里所有人对你的好感（界面上的好感条）。 */

@@ -25,6 +25,8 @@ import { createScriptEventRepository } from './core/script/repository.js';
 import { createAffinityRepository } from './core/world/affinity.js';
 import type { AffinityRepository } from './core/world/affinity.js';
 import { createJournalRepository } from './core/world/journal.js';
+import { createSnapshotRepository } from './core/world/snapshots.js';
+import type { SnapshotRepository } from './core/world/snapshots.js';
 import type { JournalRepository } from './core/world/journal.js';
 import { createWorldRepository } from './core/world/repository.js';
 import type { WorldRepository } from './core/world/repository.js';
@@ -209,6 +211,14 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
     journalRepo ??= createJournalRepository(storage.db, resolveCharacterName);
     return journalRepo;
+  });
+
+  /** 手动存档 / 读档：把整本故事拍成快照 */
+  let snapshotRepo: SnapshotRepository | null = null;
+  app.decorate('snapshots', (): SnapshotRepository => {
+    if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
+    snapshotRepo ??= createSnapshotRepository(storage.db);
+    return snapshotRepo;
   });
 
   let scriptRepo: ScriptEventRepository | null = null;
