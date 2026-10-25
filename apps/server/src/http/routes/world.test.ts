@@ -13,28 +13,63 @@ const silentLogger = pino({ level: 'silent' });
 
 interface Harness {
   app: AppInstance;
-  /** 每次生成收到的请求，按顺序记录 —— 用来断言「历史真的接上了」 */
-  requests: ChatRequest[];
-  /** 非流式调用次数（偷听反应走这条） */
-  chatCalls: () => number;
+  /** 每次流式生成（角色接话）收到的请求，按顺序记录 */
+  streamRequests: ChatRequest[];
+  /** 每次非流式调用（好感评分 / 偷听反应） */
+  chatRequests: ChatRequest[];
+  /** 非流式调用分两类计数，断言时不会互相干扰 */
+  reactionCalls: () => number;
+  scoreCalls: () => number;
 }
 
-async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
+/** 评分提示词里独有的一句话，用来区分「这次调用是评分还是偷听反应」。 */
+const SCORE_MARKER = '给玩家刚才这一轮的表现打分';
+
+interface HarnessOptions {
+  /** 覆盖 features 开关（例如关掉好感评分） */
+  features?: Record<string, boolean>;
+  /** 评分那一次调用返回什么（默认给合法 JSON；传别的可以测解析失败） */
+  scoreReply?: string;
+}
+
+async function withApp<T>(
+  run: (harness: Harness) => Promise<T>,
+  options: HarnessOptions = {},
+): Promise<T> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tavern-world-'));
   const config = createTestConfig();
   config.storage.path = path.join(dir, 'test.db');
+  config.features = options.features ?? {};
 
-  const requests: ChatRequest[] = [];
+  const streamRequests: ChatRequest[] = [];
+  const chatRequests: ChatRequest[] = [];
   let streamCalls = 0;
-  let chatCalls = 0;
+  let reactionCalls = 0;
+  let scoreCalls = 0;
+
   const provider = defineProvider({
     meta: { name: 'fake', version: '1.0.0' },
     capabilities: { streaming: true },
     defaultModel: 'fake-model',
     hasCredentials: true,
     async chat(request) {
-      requests.push(request);
-      chatCalls += 1;
+      chatRequests.push(request);
+      const system = request.messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n');
+
+      if (system.includes(SCORE_MARKER)) {
+        scoreCalls += 1;
+        return {
+          text: options.scoreReply ?? '{"delta": 3, "reason": "他把话说到点子上"}',
+          finishReason: 'stop',
+          model: 'fake-model',
+          durationMs: 1,
+        };
+      }
+
+      reactionCalls += 1;
       return {
         text: '他把手上的活停了半拍，没抬头。',
         finishReason: 'stop',
@@ -43,7 +78,7 @@ async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
       };
     },
     async *stream(request) {
-      requests.push(request);
+      streamRequests.push(request);
       streamCalls += 1;
       yield { type: 'start' as const, model: 'fake-model', at: Date.now() };
       yield { type: 'delta' as const, text: `第${streamCalls}次` };
@@ -62,11 +97,23 @@ async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
   await app.ready();
 
   try {
-    return await run({ app, requests, chatCalls: () => chatCalls });
+    return await run({
+      app,
+      streamRequests,
+      chatRequests,
+      reactionCalls: () => reactionCalls,
+      scoreCalls: () => scoreCalls,
+    });
   } finally {
     await app.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** 把最近一次流式请求的提示词拼成一段，方便断言「模型看到了什么」。 */
+function lastStreamPrompt(streamRequests: ChatRequest[]): string {
+  const request = streamRequests.at(-1);
+  return request ? request.messages.map((message) => message.content).join('\n') : '';
 }
 
 async function seedCharacter(app: AppInstance, name: string, extra: object = {}): Promise<string> {
@@ -263,7 +310,7 @@ describe('场景内说话', () => {
   });
 
   it('每轮接在上一条后面，历史能看到前一轮', async () => {
-    await withApp(async ({ app, requests }) => {
+    await withApp(async ({ app, streamRequests }) => {
       const boss = await seedCharacter(app, '月灯老板');
       const { sceneId } = await seedSave(app, '月灯镇', [boss]);
 
@@ -274,10 +321,9 @@ describe('场景内说话', () => {
       expect(detail.messages).toHaveLength(4);
 
       // 第二轮发给模型的内容里必须含第一轮的回复，否则等于每轮从零开始
-      const second = requests.at(-1)!;
-      const flat = second.messages.map((message) => message.content).join('\n');
-      expect(flat).toContain('第1次接话');
-      expect(flat).toContain('第二句');
+      const prompt = lastStreamPrompt(streamRequests);
+      expect(prompt).toContain('第1次接话');
+      expect(prompt).toContain('第二句');
     });
   });
 
@@ -348,7 +394,7 @@ describe('低声与偷听', () => {
   }
 
   it('低声这句会记下来，并且提示词里写明是压低了声音', async () => {
-    await withApp(async ({ app, requests }) => {
+    await withApp(async ({ app, streamRequests }) => {
       const { sceneId } = await threePeople(app);
       forceRandom(0.999);
 
@@ -357,17 +403,14 @@ describe('低声与偷听', () => {
       const detail = await sceneDetail(app, sceneId);
       expect(detail.messages[0]).toMatchObject({ role: 'user', whisper: true });
 
-      const prompt = requests
-        .at(-1)!
-        .messages.map((message) => message.content)
-        .join('\n');
+      const prompt = lastStreamPrompt(streamRequests);
       expect(prompt).toContain('压低声音');
       expect(prompt).toContain('在场的还有');
     });
   });
 
   it('没人听见时给确定反馈，而不是让玩家猜', async () => {
-    await withApp(async ({ app, chatCalls }) => {
+    await withApp(async ({ app, reactionCalls }) => {
       const { sceneId } = await threePeople(app);
       forceRandom(0.999);
 
@@ -376,7 +419,7 @@ describe('低声与偷听', () => {
       expect(eavesdrop).toMatchObject({ heard: false });
       expect(String(eavesdrop?.text)).toContain('没人注意到');
       // 没被听见就不该额外生成反应
-      expect(chatCalls()).toBe(0);
+      expect(reactionCalls()).toBe(0);
 
       // 这条反馈也留在场景里：刷新之后还能看到自己当时是安全的
       const detail = await sceneDetail(app, sceneId);
@@ -386,7 +429,7 @@ describe('低声与偷听', () => {
   });
 
   it('被听见时生成偷听者的反应，并插进对话流', async () => {
-    await withApp(async ({ app, chatCalls }) => {
+    await withApp(async ({ app, reactionCalls }) => {
       const { sceneId } = await threePeople(app);
       forceRandom(0);
 
@@ -395,7 +438,7 @@ describe('低声与偷听', () => {
       const eavesdrop = findEvent(frames, 'eavesdrop');
       expect(eavesdrop).toMatchObject({ heard: true });
       expect(eavesdrop?.listener).toMatchObject({ name: '夜巡人' });
-      expect(chatCalls()).toBe(1);
+      expect(reactionCalls()).toBe(1);
 
       const detail = await sceneDetail(app, sceneId);
       const reaction = detail.messages.at(-1);
@@ -426,7 +469,7 @@ describe('低声与偷听', () => {
   });
 
   it('没听见的人不会在之后的发言里知道低声说了什么', async () => {
-    await withApp(async ({ app, requests }) => {
+    await withApp(async ({ app, streamRequests }) => {
       const { cat, sceneId } = await threePeople(app);
 
       forceRandom(0.999);
@@ -434,10 +477,7 @@ describe('低声与偷听', () => {
 
       // 下一个开口的人被指定成猫：他当时没听见，提示词里只能是占位文本
       await speak(app, sceneId, '@猫 你怎么看？');
-      const prompt = requests
-        .at(-1)!
-        .messages.map((message) => message.content)
-        .join('\n');
+      const prompt = lastStreamPrompt(streamRequests);
       expect(prompt).not.toContain('码头那批货有问题');
       expect(prompt).toContain('没听清');
 
@@ -448,7 +488,7 @@ describe('低声与偷听', () => {
   });
 
   it('敏感内容会记成「他记住了」', async () => {
-    await withApp(async ({ app, requests }) => {
+    await withApp(async ({ app, chatRequests, streamRequests }) => {
       const { sceneId } = await threePeople(app);
       forceRandom(0);
 
@@ -456,10 +496,9 @@ describe('低声与偷听', () => {
       const eavesdrop = findEvent(frames, 'eavesdrop');
       expect(eavesdrop).toMatchObject({ heard: true, sensitive: true });
 
-      // 最后一条请求就是偷听反应的提示词：里面要带着他的秘密，否则反应戳不到点
-      const reactionPrompt = requests
-        .at(-1)!
-        .messages.map((message) => message.content)
+      // 最后一条非流式请求就是偷听反应的提示词（评分在它之前）
+      const reactionPrompt = (chatRequests.at(-1)?.messages ?? [])
+        .map((message) => message.content)
         .join('\n');
       expect(reactionPrompt).toContain('名单上最后一个人是他自己');
       expect(reactionPrompt).toContain('你听见的是');
@@ -467,10 +506,7 @@ describe('低声与偷听', () => {
       // 下一轮任何人开口都能看到「他记住了」这条事实
       forceRandom(0.999);
       await speak(app, sceneId, '刚说到哪了？');
-      const laterPrompt = requests
-        .at(-1)!
-        .messages.map((message) => message.content)
-        .join('\n');
+      const laterPrompt = lastStreamPrompt(streamRequests);
       expect(laterPrompt).toContain('听见了你压低声音说的话');
     });
   });
@@ -555,7 +591,7 @@ describe('私密场景', () => {
   });
 
   it('私密场景里没有第三人，低声也不算被偷听', async () => {
-    await withApp(async ({ app, chatCalls }) => {
+    await withApp(async ({ app, reactionCalls }) => {
       const boss = await seedCharacter(app, '月灯老板');
       const { sceneId } = await seedSave(app, '月灯镇', [boss]);
 
@@ -568,7 +604,7 @@ describe('私密场景', () => {
 
       const frames = await speak(app, privateId, '在这儿说话没人听得见吧？', { whisper: true });
       expect(frames.some((frame) => frame.type === 'eavesdrop')).toBe(false);
-      expect(chatCalls()).toBe(0);
+      expect(reactionCalls()).toBe(0);
     });
   });
 
@@ -629,5 +665,103 @@ describe('私密场景', () => {
       expect(again.statusCode).toBe(400);
       expect(again.json().error.message).toContain('已经在一个私密场景里');
     });
+  });
+});
+
+describe('好感度', () => {
+  it('每轮结束打一次分，并把变化写进库', async () => {
+    await withApp(async ({ app, scoreCalls }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      const frames = await speak(app, sceneId, '你今天气色不太好。');
+      const affinity = findEvent(frames, 'affinity');
+      expect(affinity).toMatchObject({
+        characterId: boss,
+        delta: 3,
+        value: 53,
+        mood: 'neutral',
+      });
+      expect(scoreCalls()).toBe(1);
+
+      const list = await app.inject({
+        method: 'GET',
+        url: `/api/world/saves/${saveId}/affinity`,
+      });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().data).toHaveLength(1);
+      expect(list.json().data[0]).toMatchObject({
+        characterId: boss,
+        characterName: '月灯老板',
+        value: 53,
+        lastReason: '他把话说到点子上',
+      });
+    });
+  });
+
+  it('跨过 60 会松口：写进事实，之后的提示词带上「松了口」', async () => {
+    await withApp(async ({ app, streamRequests }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      // 把好感摆到 58：这一轮 +3 就跨过 60（直接改库，省掉三轮对话）
+      app.affinity().apply(saveId, boss, 8, '（用例安排）');
+
+      const frames = await speak(app, sceneId, '我替你把话圆回来。');
+      expect(findEvent(frames, 'affinity')).toMatchObject({ value: 61, mood: 'open' });
+
+      await speak(app, sceneId, '那就说说吧。');
+      const prompt = lastStreamPrompt(streamRequests);
+      expect(prompt).toContain('松了口');
+    });
+  });
+
+  it('跌破 20 就冷处理', async () => {
+    await withApp(async ({ app, streamRequests }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      app.affinity().apply(saveId, boss, -40, '（用例安排）');
+      await speak(app, sceneId, '你到底说不说？');
+
+      const prompt = lastStreamPrompt(streamRequests);
+      expect(prompt).toContain('你对他很冷');
+    });
+  });
+
+  it('评分可以关掉：不再多发一次请求，也不发好感事件', async () => {
+    await withApp(
+      async ({ app, scoreCalls }) => {
+        const boss = await seedCharacter(app, '月灯老板');
+        const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+        const frames = await speak(app, sceneId, '来一杯。');
+        expect(findEvent(frames, 'affinity')).toBeUndefined();
+        expect(scoreCalls()).toBe(0);
+      },
+      { features: { affinityScoring: false } },
+    );
+  });
+
+  it('评分解析不出来时明说「没评上分」，不假装没有变化', async () => {
+    await withApp(
+      async ({ app }) => {
+        const boss = await seedCharacter(app, '月灯老板');
+        const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+        const frames = await speak(app, sceneId, '来一杯。');
+        const affinity = findEvent(frames, 'affinity');
+        expect(affinity).toMatchObject({ failed: true, delta: 0, value: 50 });
+        expect(String(affinity?.reason)).toContain('没评上分');
+
+        // 没评上分就不该写库
+        const list = await app.inject({
+          method: 'GET',
+          url: `/api/world/saves/${saveId}/affinity`,
+        });
+        expect(list.json().data).toEqual([]);
+      },
+      { scoreReply: '这轮我觉得还行吧' },
+    );
   });
 });

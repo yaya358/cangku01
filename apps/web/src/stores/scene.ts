@@ -1,4 +1,5 @@
 import type {
+  Affinity,
   ChatStreamPayload,
   Message,
   MessageKind,
@@ -7,10 +8,12 @@ import type {
   SceneDetail,
   ScenePresent,
 } from '@tavern/shared';
+import { AFFINITY_INITIAL } from '@tavern/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import {
   createPrivateScene,
+  fetchAffinity,
   fetchScene,
   listScenes,
   returnToSourceScene,
@@ -76,6 +79,17 @@ export const useSceneStore = defineStore('scene', () => {
   const messages = ref<SceneBubble[]>([]);
   /** 私密场景：原来那个公开场景叫什么（回头的路要有名字才好走） */
   const sourceSceneName = ref<string | null>(null);
+  /** 各人对你的好感（characterId → 记录） */
+  const affinity = ref<Record<string, Affinity>>({});
+  /** 上一轮的好感变化，用于界面上一行提示 */
+  const affinityNote = ref<{
+    characterId: string;
+    name: string;
+    delta: number;
+    value: number;
+    reason: string;
+    failed: boolean;
+  } | null>(null);
   const loading = ref(false);
   const streaming = ref(false);
   const error = ref<string | null>(null);
@@ -115,6 +129,59 @@ export const useSceneStore = defineStore('scene', () => {
     }
   }
 
+  /** 把关系统一对一遍（只对已经有记录的人，没打过交道的人不编数）。 */
+  async function loadAffinity(): Promise<void> {
+    const current = scene.value;
+    if (!current) return;
+    try {
+      const list = await fetchAffinity(current.saveId);
+      affinity.value = Object.fromEntries(list.map((item) => [item.characterId, item]));
+    } catch {
+      // 好感读不到不影响对话：界面上就是没有条
+    }
+  }
+
+  /** 某个人此刻的好感：没记录时按初始值显示，而不是空着。 */
+  function affinityOf(characterId: string): Affinity | null {
+    const known = affinity.value[characterId];
+    if (known) return known;
+    const person = present.value.find((item) => item.id === characterId);
+    if (!person) return null;
+    return {
+      saveId: scene.value?.saveId ?? '',
+      characterId,
+      characterName: person.name,
+      value: AFFINITY_INITIAL,
+      lastReason: '',
+      unlocked: [],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  /** 这一轮他对你的态度有没有变：存下数值，并留一行给界面。 */
+  function applyAffinity(event: Extract<ChatStreamPayload, { type: 'affinity' }>): void {
+    affinity.value = {
+      ...affinity.value,
+      [event.characterId]: {
+        saveId: scene.value?.saveId ?? '',
+        characterId: event.characterId,
+        characterName: event.name,
+        value: event.value,
+        lastReason: event.reason,
+        unlocked: affinity.value[event.characterId]?.unlocked ?? [],
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    affinityNote.value = {
+      characterId: event.characterId,
+      name: event.name,
+      delta: event.failed ? 0 : event.delta,
+      value: event.value,
+      reason: event.reason,
+      failed: event.failed ?? false,
+    };
+  }
+
   async function open(id: string): Promise<void> {
     loading.value = true;
     error.value = null;
@@ -123,6 +190,7 @@ export const useSceneStore = defineStore('scene', () => {
       applyMeta(detail);
       messages.value = detail.messages.map(toBubble);
       await loadSourceName();
+      await loadAffinity();
     } catch (cause) {
       error.value = describeError(cause);
       scene.value = null;
@@ -211,7 +279,8 @@ export const useSceneStore = defineStore('scene', () => {
     });
 
     streaming.value = true;
-    controller = new AbortController();
+    const own = new AbortController();
+    controller = own;
 
     const patch = (id: string, changes: Partial<SceneBubble>): void => {
       const target = messages.value.find((bubble) => bubble.id === id);
@@ -220,7 +289,7 @@ export const useSceneStore = defineStore('scene', () => {
 
     try {
       await sendSceneTurn(current.id, text, {
-        signal: controller.signal,
+        signal: own.signal,
         kind,
         whisper,
         onEvent: (event: ChatStreamPayload) => {
@@ -238,6 +307,13 @@ export const useSceneStore = defineStore('scene', () => {
                   totalTokens: event.usage?.totalTokens ?? null,
                 },
               });
+              /**
+               * 正文写完了就先解锁输入。
+               *
+               * 这一轮后面还有打分与偷听反应（各要一次模型调用），
+               * 让「停」按钮多亮一秒半，用户会以为卡住了。
+               */
+              streaming.value = false;
               break;
             case 'saved':
               patch(tempUserId, { id: event.userMessageId, optimistic: false });
@@ -248,6 +324,9 @@ export const useSceneStore = defineStore('scene', () => {
               break;
             case 'eavesdrop':
               applyEavesdrop(event);
+              break;
+            case 'affinity':
+              applyAffinity(event);
               break;
             case 'notice':
               // 剧情事件：插在助手气泡之前，读起来就是「提示 → 有人应对」
@@ -271,9 +350,13 @@ export const useSceneStore = defineStore('scene', () => {
     } catch (cause) {
       error.value = describeError(cause);
     } finally {
-      const aborted = controller?.signal.aborted ?? false;
-      streaming.value = false;
-      controller = null;
+      const aborted = own.signal.aborted;
+      // 用户已经发了下一句：别把新的那一轮的状态清掉，也别用旧数据刷掉新气泡
+      const isCurrent = controller === own;
+      if (isCurrent) {
+        streaming.value = false;
+        controller = null;
+      }
 
       const last = messages.value.find((bubble) => bubble.id === tempAssistantId);
       if (last) {
@@ -284,7 +367,7 @@ export const useSceneStore = defineStore('scene', () => {
         }
       }
 
-      await refresh({ messages: !aborted });
+      if (isCurrent) await refresh({ messages: !aborted });
     }
   }
 
@@ -335,6 +418,8 @@ export const useSceneStore = defineStore('scene', () => {
     conversationId,
     messages,
     sourceSceneName,
+    affinity,
+    affinityNote,
     loading,
     streaming,
     error,
@@ -342,6 +427,7 @@ export const useSceneStore = defineStore('scene', () => {
     isEmpty,
     isPrivate,
     speakerName,
+    affinityOf,
     open,
     refresh,
     send,

@@ -22,6 +22,8 @@ import type { Extension } from './core/extension/index.js';
 import { createProvidersFromConfig } from './core/provider/index.js';
 import { seedSampleCharacters } from './core/samples/index.js';
 import { createScriptEventRepository } from './core/script/repository.js';
+import { createAffinityRepository } from './core/world/affinity.js';
+import type { AffinityRepository } from './core/world/affinity.js';
 import { createWorldRepository } from './core/world/repository.js';
 import type { WorldRepository } from './core/world/repository.js';
 import type { ScriptEventRepository } from './core/script/repository.js';
@@ -177,6 +179,19 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
     worldRepo ??= createWorldRepository(storage.db);
     return worldRepo;
+  });
+
+  let affinityRepo: AffinityRepository | null = null;
+  app.decorate('affinity', (): AffinityRepository => {
+    if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
+    // 名字从角色仓储取：好感列表里要显示人名，不该让调用方再查一遍。
+    // 这里自己兜一次懒创建：好感先于角色被访问时也不会读出一片「某人」。
+    affinityRepo ??= createAffinityRepository(storage.db, (characterId) => {
+      if (!storage.isOpen) return undefined;
+      characterRepo ??= createCharacterRepository(storage.db);
+      return characterRepo.getById(characterId)?.name;
+    });
+    return affinityRepo;
   });
 
   let scriptRepo: ScriptEventRepository | null = null;

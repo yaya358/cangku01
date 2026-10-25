@@ -1,4 +1,5 @@
 import type {
+  Affinity,
   ChatStreamPayload,
   CreateSaveInput,
   MessageKind,
@@ -9,6 +10,7 @@ import type {
 } from '@tavern/shared';
 import {
   WORLD_SAVES_ENDPOINT,
+  worldSaveAffinityEndpoint,
   worldSaveScenesEndpoint,
   worldSceneEndpoint,
   worldScenePrivateEndpoint,
@@ -46,6 +48,11 @@ export function createSave(input: CreateSaveInput): Promise<{ save: Save; scene:
 /** 场景详情：场景 + 在场者 + 名字对照表 + 当前分支的消息。 */
 export function fetchScene(id: string): Promise<SceneDetail> {
   return apiGet<SceneDetail>(worldSceneEndpoint(id), { timeoutMs: 15_000 });
+}
+
+/** 这个存档里所有人对你的好感（界面上的好感条）。 */
+export function fetchAffinity(saveId: string): Promise<Affinity[]> {
+  return apiGet<Affinity[]>(worldSaveAffinityEndpoint(saveId), { timeoutMs: 10_000 });
 }
 
 export interface SendSceneHandlers {

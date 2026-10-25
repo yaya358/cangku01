@@ -344,6 +344,33 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('ALTER TABLE scenes ADD COLUMN source_scene_id TEXT');
     },
   },
+  {
+    version: 13,
+    name: 'affinity',
+    up: (db) => {
+      /**
+       * 好感度：他对你的态度。
+       *
+       * 按「存档 + 角色」存：同一个角色在另一个存档里是另一个人生，
+       * 上一周目的交情不该顺着世界线带过来。
+       *
+       *   value       —— 0~100，初始 50（刚认识，不冷不热）
+       *   last_reason —— 上一轮为什么变（一句人话，界面显示这个才有说服力）
+       *   unlocked    —— 已经触发过的阈值点（JSON 数组），保证「松口」只发生一次
+       */
+      db.exec(`
+        CREATE TABLE affinity (
+          save_id      TEXT NOT NULL REFERENCES saves (id) ON DELETE CASCADE,
+          character_id TEXT NOT NULL REFERENCES characters (id) ON DELETE CASCADE,
+          value        INTEGER NOT NULL DEFAULT 50,
+          last_reason  TEXT NOT NULL DEFAULT '',
+          unlocked     TEXT NOT NULL DEFAULT '[]',
+          updated_at   TEXT NOT NULL,
+          PRIMARY KEY (save_id, character_id)
+        )
+      `);
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

@@ -87,6 +87,38 @@
         <span v-if="canPullAway" class="presence__note">他会跟你走 —— 留下的人会看见</span>
       </p>
 
+      <!-- 关系：他对你的态度会真的影响语气，所以摆在场上显眼的位置 -->
+      <div v-if="relations.length > 0" class="relations">
+        <span class="relations__label">关系</span>
+        <span
+          v-for="item in relations"
+          :key="item.id"
+          class="relation"
+          :title="`${item.reason || '还没打过交道'}（${affinityMarks.cold} 以下冷处理，${affinityMarks.open} 以上松口）`"
+        >
+          <span class="relation__name">{{ item.name }}</span>
+          <span class="relation__bar">
+            <span
+              class="relation__fill"
+              :class="`relation__fill--${item.mood}`"
+              :style="{ width: `${item.value}%` }"
+            />
+          </span>
+          <span class="relation__value">{{ item.value }}</span>
+          <span v-if="item.moodText" class="relation__mood">{{ item.moodText }}</span>
+        </span>
+      </div>
+
+      <!-- 上一轮为什么加分/减分：没有这一行，好感就只是个会动的数字 -->
+      <p v-if="affinityNote" class="relation__note">
+        {{ affinityNote.name }}
+        <template v-if="affinityNote.failed">{{ affinityNote.reason }}</template>
+        <template v-else>
+          好感 {{ affinityNote.delta >= 0 ? '+' : '' }}{{ affinityNote.delta }}
+          <span class="relation__why">· {{ affinityNote.reason }}</span>
+        </template>
+      </p>
+
       <n-alert v-if="error" type="error" :title="error" closable @close="store.clearError()" />
 
       <div ref="logRef" class="scene__log">
@@ -185,7 +217,12 @@
 
 <script setup lang="ts">
 import type { MessageKind, ScenePresent } from '@tavern/shared';
-import { characterAvatarEndpoint } from '@tavern/shared';
+import {
+  AFFINITY_COLD,
+  AFFINITY_OPEN,
+  affinityMood,
+  characterAvatarEndpoint,
+} from '@tavern/shared';
 import { NAlert, NButton, NInput, NSpin } from 'naive-ui';
 import { storeToRefs } from 'pinia';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -200,7 +237,29 @@ const router = useRouter();
 const store = useSceneStore();
 const { scene, present, messages, loading, streaming, error, turn, isEmpty, isPrivate } =
   storeToRefs(store);
-const { sourceSceneName } = storeToRefs(store);
+const { sourceSceneName, affinityNote } = storeToRefs(store);
+
+/** 关系条：只显示此刻在场的人，数值来自 store 里的好感表。 */
+const relations = computed(() =>
+  present.value
+    .map((person) => {
+      const entry = store.affinityOf(person.id);
+      if (!entry) return null;
+      const mood = affinityMood(entry.value);
+      return {
+        id: person.id,
+        name: person.name,
+        value: entry.value,
+        reason: entry.lastReason,
+        mood,
+        moodText: mood === 'open' ? '松了口' : mood === 'cold' ? '冷处理' : '',
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null),
+);
+
+/** 刻度提示：60 以上松口、20 以下冷处理，界面上要有迹可循。 */
+const affinityMarks = { open: AFFINITY_OPEN, cold: AFFINITY_COLD };
 
 /** 输入方式：说话最常用，放第一个；低声排第二（世界模式里它最常用） */
 const INPUT_MODES: { value: InputMode; label: string; placeholder: string; hint: string }[] = [
@@ -750,6 +809,103 @@ onBeforeUnmount(() => {
 .presence__note {
   color: var(--text-faint);
   font-size: 11px;
+}
+
+/* 关系条：一眼看出「他松了口」还是「他在冷处理」 */
+.relations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+}
+
+.relations__label {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+
+.relation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+
+.relation__name {
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.relation__bar {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  width: 72px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+}
+
+/* 刻度：20 与 60 各画一道细线 —— 阈值不该是隐藏规则，看得见才叫规则 */
+.relation__bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    transparent 19%,
+    rgba(236, 228, 216, 0.22) 20%,
+    transparent 21%,
+    transparent 59%,
+    rgba(236, 228, 216, 0.22) 60%,
+    transparent 61%
+  );
+  pointer-events: none;
+}
+
+.relation__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--text-faint);
+  transition: width 0.25s ease;
+}
+
+/* 松口：琥珀色；冷处理：冷灰；中间：低调的灰 —— 颜色本身就是提示 */
+.relation__fill--open {
+  background: var(--accent);
+}
+
+.relation__fill--cold {
+  background: #5b6a7a;
+}
+
+.relation__value {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.relation__mood {
+  color: var(--accent);
+  font-size: 10.5px;
+}
+
+.relation__note {
+  margin-top: -2px;
+  padding: 0 4px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.relation__why {
+  color: var(--text-faint);
 }
 
 /* 低声说的话：加个标签，气泡换成虚线，和当众说话区分开 */

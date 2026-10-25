@@ -10,6 +10,7 @@ import type { ScriptEventRepository } from '../core/script/repository.js';
 import type { SqliteStorage } from '../core/storage/index.js';
 import type { WorldbookRepository } from '../core/worldbook/repository.js';
 import type { WorldRepository } from '../core/world/repository.js';
+import type { AffinityRepository } from '../core/world/affinity.js';
 import type { AppLogger } from '../lib/logger.js';
 
 /**
@@ -59,6 +60,8 @@ declare module 'fastify' {
     messages: () => MessageRepository;
     /** 世界存档仓储（存档 / 场景 / 在场者） */
     world: () => WorldRepository;
+    /** 好感度仓储（存档 × 角色） */
+    affinity: () => AffinityRepository;
     /** 剧本事件仓储（含会话触发记录） */
     scriptEvents: () => ScriptEventRepository;
   }

@@ -8,7 +8,7 @@
 本地 AI 角色扮演酒馆：Vue3 前端 + Fastify/SQLite 后端，pnpm monorepo。
 仓库 `C:\Users\jingy\Desktop\vork01`，远端 `github.com/yaya358/cangku01`（main）。
 
-**当前状态**：55 个提交 / 324 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
+**当前状态**：56 个提交 / 344 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
 
 ```bash
 pnpm install && pnpm dev     # 后端 8787 + 前端 5173
@@ -32,8 +32,8 @@ pnpm -r run typecheck && pnpm lint
 | 1 | 场景对话接口（在场者接话） | ✅ 已完成（`routes/world.ts`） |
 | 2 | 前端场景视图 | ✅ 已完成（`views/SceneView.vue` + `GET /api/world/scenes/:id`） |
 | 3 | 私聊场景 + 低声 + 偷听 | ✅ 已完成（`core/world/eavesdrop.ts`、`whisper.ts`、场景私聊接口） |
-| 4 | 好感度打分 + 阈值解锁 | ⬜ **接下来做这个** |
-| 5 | 主线章节 + 情报本侧栏 | ⬜ |
+| 4 | 好感度打分 + 阈值解锁 | ✅ 已完成（`core/world/affinity.ts`、`scoring.ts`、关系条） |
+| 5 | 主线章节 + 情报本侧栏 | ⬜ **接下来做这个** |
 | 6 | 旧会话迁移成私密场景 | ⬜ |
 
 ### 第 2 步：前端场景视图（已完成，要点留着备查）
@@ -72,11 +72,22 @@ pnpm -r run typecheck && pnpm lint
 - 新增上下文层 `scene`（此刻的地方 + 在场的人 + 「他压低声音说，旁边的人未必听得见」），
   这是让模型不把不在场的人拉进来说话的关键。
 
-### 第 4 步：好感度
+### 第 4 步：好感度（已完成，要点留着备查）
 
-- 新表 `affinity(save_id, character_id, value, last_reason, unlocked)`
-- 每轮结束单独一次小请求打分（-5~+5 + 一句理由），**必须可关闭**，失败不阻塞主回复
-- 阈值：≥60 松口给情报；≤20 冷处理
+- 表 `affinity (save_id, character_id, value, last_reason, unlocked, updated_at)`，
+  主键「存档 + 角色」：同一个角色在另一条世界线里是另一个人生。初始 50，永远夹在 0~100
+  （好感是尺子不是计数器，冲过头阈值就失去意义）。
+- 每轮结束单独一次非流式打分（`core/world/scoring.ts`）：让模型换旁白视角看「刚才这一轮」，
+  产出 `{"delta": -5..5, "reason": "一句具体的话"}`。解析宽容（```json 包裹、前后废话、纯文本都能捞），
+  捞不到就发 `failed` 事件、不写库 —— 不假装「这轮没有变化」。
+- 可关：`features: { affinityScoring: false }`（config/user.yaml 里加），关掉后连请求都不发。
+- 阈值 `>= 60` 松口、`<= 20` 冷处理：跨过去一次就写进 `unlocked` + 一条 fact，之后
+  在提示词里变成语气（新上下文层 `affinity`）。**数值只画条不改语气等于白算** ——
+  所以这一层必须接进 pipeline。
+- 接口：`GET /api/world/saves/:id/affinity`；SSE `affinity` 事件带 delta/value/mood；
+  界面在在场条下面画「关系」条（20/60 有刻度线），下面一行是「谁 · 好感 +3 · 为什么」。
+- 交互细节：SSE 的 `done` 一到就解锁输入，不等后面的打分/偷听反应（那两次调用还要 1.5s 左右，
+  否则「停」按钮一直亮着，像卡住）。
 
 ### 第 5 步：主线 + 情报本
 

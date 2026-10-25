@@ -6,6 +6,7 @@ import type {
   ScenePresent,
 } from '@tavern/shared';
 import { CreateSaveSchema, WORLD_SAVES_ENDPOINT, WORLD_SCENES_ENDPOINT } from '@tavern/shared';
+import { affinityMood } from '@tavern/shared';
 import { z } from 'zod';
 import type { ServerResponse } from 'node:http';
 import { prepareConversationContext } from '../../core/context/index.js';
@@ -18,6 +19,7 @@ import {
 } from '../../core/world/eavesdrop.js';
 import type { EavesdropListener } from '../../core/world/eavesdrop.js';
 import { describeReachability } from '../../core/world/repository.js';
+import { buildScoringPrompt, parseScore, SCORE_FAILED_REASON } from '../../core/world/scoring.js';
 import { contentForSpeaker, whisperAudience } from '../../core/world/whisper.js';
 import type { AppInstance } from '../../types/fastify.js';
 import { resolveProvider } from '../chat-support.js';
@@ -142,6 +144,17 @@ export function registerWorldRoutes(app: AppInstance): void {
       }));
 
     return success(request.id, scenes);
+  });
+
+  /**
+   * 这个存档里所有人对你的好感（界面的好感条 + 第 5 步的侧栏都用它）。
+   *
+   * 只列有记录的人：没打过照面的人不该出现在列表里 —— 世界是有边界的。
+   */
+  app.get(`${WORLD_SAVES_ENDPOINT}/:id/affinity`, async (request) => {
+    const { id } = request.params as { id: string };
+    if (!app.world().getSave(id)) throw AppError.notFound(`存档不存在: ${id}`);
+    return success(request.id, app.affinity().list(id));
   });
 
   /**
@@ -427,6 +440,8 @@ export function registerWorldRoutes(app: AppInstance): void {
       userName: conversation.player.name || undefined,
       player: conversation.player,
       facts: app.scriptEvents().facts(conversation.id),
+      // 他对你的态度会影响语气：这条数据不传下去，好感就只是个画的进度条
+      affinity: { value: app.affinity().get(scene.saveId, speaker.id).value },
     });
 
     const provider = resolveProvider(app);
@@ -475,6 +490,74 @@ export function registerWorldRoutes(app: AppInstance): void {
       });
     } else {
       app.conversations().touch(conversation.id, userMessage.id);
+    }
+
+    /**
+     * 给这一轮打分（好感度）。
+     *
+     * 为什么单独一次请求：在角色台词里塞「（好感 +3）」会毁掉表演；
+     * 让同一个模型换旁白视角看「刚才这一轮」，才评得准、也才说得出口。
+     *
+     * 三条边界：可关闭（features.affinityScoring）、失败不阻塞主回复（已经落库了）、
+     * 解析不出来就明说「没评上分」，不假装这一轮没有变化。
+     */
+    const scoringEnabled = app.config.features['affinityScoring'] !== false;
+    if (assistantId && scoringEnabled) {
+      const before = app.affinity().get(scene.saveId, speaker.id);
+      let score: { delta: number; reason: string } | null = null;
+
+      try {
+        const scored = await provider.chat(
+          {
+            model,
+            messages: buildScoringPrompt({
+              character: speaker,
+              userName: conversation.player.name || '对方',
+              playerLine: body.content,
+              reply: result.text,
+            }),
+            params: { temperature: 0.4 },
+          },
+          { signal: controller.signal, requestId: request.id },
+        );
+        score = parseScore(scored.text);
+      } catch (error) {
+        request.log.warn({ err: error }, '好感评分失败');
+      }
+
+      if (score) {
+        const applied = app.affinity().apply(scene.saveId, speaker.id, score.delta, score.reason);
+
+        // 阈值点只记一次：跨过去就写进事实，之后模型会记得「他已经松口了」
+        for (const key of applied.crossed) {
+          const fact =
+            key === 'affinity:open'
+              ? `${speaker.name}已经对你松了口 —— 他愿意多说一点了。`
+              : `${speaker.name}开始冷处理 —— 他不再主动往下说了。`;
+          app.scriptEvents().recordFact(conversation.id, key, fact);
+        }
+
+        writeEvent(raw, {
+          type: 'affinity',
+          characterId: speaker.id,
+          name: speaker.name,
+          value: applied.affinity.value,
+          delta: score.delta,
+          reason: score.reason,
+          mood: affinityMood(applied.affinity.value),
+        });
+      } else {
+        writeEvent(raw, {
+          type: 'affinity',
+          characterId: speaker.id,
+          name: speaker.name,
+          value: before.value,
+          delta: 0,
+          reason: SCORE_FAILED_REASON,
+          mood: affinityMood(before.value),
+          failed: true,
+        });
+      }
     }
 
     /**

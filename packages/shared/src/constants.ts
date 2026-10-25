@@ -113,6 +113,11 @@ export function worldSaveScenesEndpoint(saveId: string): string {
   return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}/scenes`;
 }
 
+/** 某存档里所有人对你的好感（界面上的好感条）。 */
+export function worldSaveAffinityEndpoint(saveId: string): string {
+  return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}/affinity`;
+}
+
 /** 场景集合（详情、进场都要用）。 */
 export const WORLD_SCENES_ENDPOINT = `${API_PREFIX}/world/scenes`;
 

@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@tavern/shared';
+import { affinityMood } from '@tavern/shared';
 import { estimateTokens } from './tokens.js';
 import { DEFAULT_BUDGET, DEFAULT_SYSTEM_PROMPT } from './types.js';
 import type { AssembledContext, AssembleInput, ContextBudget, ContextLayer } from './types.js';
@@ -21,6 +22,8 @@ const PRIORITY = {
   persona: 700,
   // 秘密与目的比场景重要：丢了它角色就退回「问一句答一句」
   motive: 680,
+  // 好感度：只影响语气松紧，丢了世界还转得下去
+  affinity: 675,
   // 玩家身份：决定角色对谁说话，丢了就变成对陌生人客套
   userPersona: 730,
   // 剧本事件：这一轮刚发生的事，比场景和世界书都更该被看到
@@ -276,7 +279,37 @@ function collectLayers(input: AssembleInput, charName: string, userName: string)
   }
 
   /**
-   * 5. 剧情事实（已经成立的事）。
+   * 5. 他对你的态度（世界模式的好感度）。
+   *
+   * 这一层的用处是把数值变成语气：光在界面上画个进度条，模型是看不到的，
+   * 于是「好感 62」和「好感 18」说出来的话一模一样 —— 那这个数就白算了。
+   */
+  if (input.affinity) {
+    const mood = affinityMood(input.affinity.value);
+    const attitude =
+      mood === 'open'
+        ? '你已经对他松了口 —— 愿意多说一点，可以在合适的时候漏一句底，甚至主动提条件；' +
+          '但不会一次全说完，也不会突然变成另一个人。'
+        : mood === 'cold'
+          ? '你对他很冷 —— 只答必要的话，不主动推进话题，不接他递过来的台阶，也不解释自己为什么冷淡。'
+          : '';
+
+    if (attitude.length > 0) {
+      layers.push(
+        makeLayer({
+          id: 'affinity',
+          kind: 'affinity',
+          title: '他对你的态度',
+          content: `【你对他】${attitude}`,
+          priority: PRIORITY.affinity,
+          splittable: false,
+        }),
+      );
+    }
+  }
+
+  /**
+   * 6. 剧情事实（已经成立的事）。
    *
    * 这段必须写成「不可推翻」：模型很容易在下一轮把刚才发生的事当成没发生，
    * 于是玩家说「你刚才承认了」，它又装回去。
@@ -479,6 +512,7 @@ function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
         layer.kind === 'scenario' ||
         layer.kind === 'scene' ||
         layer.kind === 'motive' ||
+        layer.kind === 'affinity' ||
         layer.kind === 'event' ||
         layer.kind === 'fact' ||
         layer.kind === 'worldbook' ||

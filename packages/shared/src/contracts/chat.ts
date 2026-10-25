@@ -139,6 +139,22 @@ export type ChatStreamPayload =
       /** 听见的内容碰到了他的秘密 */
       sensitive?: boolean;
     }
+  | {
+      /**
+       * 这一轮他对你的好感变化。
+       *
+       * failed 为 true 表示评分没跑成：不加减、也不骗玩家说是 0 分的变化。
+       */
+      type: 'affinity';
+      characterId: string;
+      name: string;
+      /** 变化后的数值 */
+      value: number;
+      delta: number;
+      reason: string;
+      mood: 'open' | 'neutral' | 'cold';
+      failed?: boolean;
+    }
   | { type: 'error'; code: string; message: string; retryable: boolean };
 
 /** 非流式接口的返回体。 */

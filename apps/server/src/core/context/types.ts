@@ -22,6 +22,8 @@ export type LayerKind =
   | 'scene'
   /** 秘密与目的：让角色有戏、会主动出招 */
   | 'motive'
+  /** 好感度：他对你的态度（松口 / 冷处理） */
+  | 'affinity'
   /** 玩家身份：你是谁、你图什么 —— 决定角色怎么对你说话 */
   | 'user_persona'
   /** 剧本事件：这一轮到点了，发生了什么事 */
@@ -151,6 +153,13 @@ export interface AssembleInput {
    * 没有它，角色在你说「你刚才承认了」之后又会变回没事人。
    */
   facts?: readonly string[];
+  /**
+   * 他对你的好感（世界模式）。
+   *
+   * 不填就当没这回事：老调用方（一对一聊天、试话页）不需要知道好感度，
+   * 也不该因为多了个概念就改变语气。
+   */
+  affinity?: { value: number };
   /** 滚动摘要（阶段 6 接入） */
   summary?: string;
   /** 预算参数 */

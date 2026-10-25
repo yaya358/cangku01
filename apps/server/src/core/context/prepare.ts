@@ -32,6 +32,8 @@ export interface PrepareInput {
     kind?: 'public' | 'private';
     others?: readonly { name: string; busyWith?: string | null }[];
   };
+  /** 他对你的好感（世界模式：决定语气松紧） */
+  affinity?: { value: number };
   /** 玩家身份：你是谁、你图什么。不传时角色会把你当陌生人 */
   player?: { name?: string; role?: string; goal?: string };
   /** 本轮触发的剧本事件（到点发生的剧情） */
@@ -111,6 +113,7 @@ export function prepareConversationContext(input: PrepareInput): PreparedContext
     ...(input.userInputKind ? { userInputKind: input.userInputKind } : {}),
     ...(input.whisper ? { whisper: true } : {}),
     ...(input.scene ? { scene: input.scene } : {}),
+    ...(input.affinity ? { affinity: input.affinity } : {}),
     worldbook: toWorldbookLayers(worldbook.hits),
     ...(input.events && input.events.length > 0 ? { events: input.events } : {}),
     ...(input.facts && input.facts.length > 0 ? { facts: input.facts } : {}),
