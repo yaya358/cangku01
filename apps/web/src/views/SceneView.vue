@@ -289,6 +289,22 @@
                 说
               </n-button>
               <n-button v-else type="error" ghost @click="store.stop()">停</n-button>
+
+              <!-- 不知道问什么时的台阶：让在场的人自己往前走一步（每章有限次） -->
+              <n-button
+                secondary
+                :loading="advancing"
+                :disabled="streaming || advancing || advanceRemaining <= 0"
+                :title="
+                  advanceRemaining > 0
+                    ? '主角先不说话，让在场的人推一下局面 —— 只推过程，推不到结局'
+                    : '这一章的世界已经走完了，接下来该你自己开口'
+                "
+                @click="nextStep"
+              >
+                下一步 {{ advanceRemaining }}
+              </n-button>
+
               <span class="scene__hint">
                 @名字 指定谁先说；不指定的话在场的人轮流接。每轮都会落库。
               </span>
@@ -383,7 +399,7 @@ const router = useRouter();
 const store = useSceneStore();
 const { scene, present, messages, loading, streaming, error, turn, isEmpty, isPrivate } =
   storeToRefs(store);
-const { sourceSceneName, affinityNote, journal } = storeToRefs(store);
+const { sourceSceneName, affinityNote, journal, advancing, advanceRemaining } = storeToRefs(store);
 
 /** 关系条：只显示此刻在场的人，数值来自 store 里的好感表。 */
 const relations = computed(() =>
@@ -494,6 +510,17 @@ async function addressFocus(whisper: boolean, withQuestion = false): Promise<voi
   draftRef.value?.focus();
 }
 
+/**
+ * 下一步：主角先不说话，让在场的人推一下局面。
+ *
+ * 额度由服务端管（每章两次），推不到结局 —— 手滑点完也得自己开口。
+ * 失败时错误进 store.error，界面上是一条可关闭的提示。
+ */
+async function nextStep(): Promise<void> {
+  await store.advance();
+  await nextTick();
+  logRef.value?.scrollTo({ top: logRef.value.scrollHeight, behavior: 'smooth' });
+}
 /** 新手引导：只在第一次进世界里出现，点过就不再打扰 */
 const GUIDE_KEY = 'tavern.world.guide.v1';
 const showGuide = ref(false);

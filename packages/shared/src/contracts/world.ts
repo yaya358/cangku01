@@ -144,6 +144,26 @@ export const SceneOpeningSchema = z.object({
 });
 export type SceneOpening = z.infer<typeof SceneOpeningSchema>;
 
+/**
+ * 「下一步」的结果：主角没开口，在场的人自己往前走了一步。
+ *
+ * remaining = 这一章还能按几次。到 0 就只能自己说话了 ——
+ * 它能推过程，但推不到结局（答案只从「把话说对」来）。
+ */
+export const SceneAdvanceSchema = z.object({
+  /** 落库的那条消息（谁说的、说了什么） */
+  message: z.object({
+    id: z.string(),
+    speakerId: z.string().nullable(),
+    speakerName: z.string().nullable(),
+    content: z.string(),
+    createdAt: z.string(),
+  }),
+  remaining: z.number().int().nonnegative(),
+  budget: z.number().int().nonnegative(),
+});
+export type SceneAdvance = z.infer<typeof SceneAdvanceSchema>;
+
 /** 新建存档：顺带建第一个场景，并把这些人放进去。 */
 export const CreateSaveSchema = z.object({
   name: z.string().min(1).max(60),

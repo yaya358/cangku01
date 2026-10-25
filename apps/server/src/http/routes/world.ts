@@ -7,6 +7,7 @@ import type {
 } from '@tavern/shared';
 import {
   CreateSaveSchema,
+  WORLD_ADVANCE_BUDGET,
   DEFAULT_THEME_ID,
   themeById,
   WORLD_SAVES_ENDPOINT,
@@ -27,6 +28,7 @@ import {
 import type { EavesdropListener } from '../../core/world/eavesdrop.js';
 import { describeReachability } from '../../core/world/repository.js';
 import { firstSentence } from '../../core/world/journal.js';
+import { buildAdvancePrompt, fallbackAdvance } from '../../core/world/advance.js';
 import {
   buildChapterPrompt,
   buildOpeningPrompt,
@@ -385,6 +387,7 @@ export function registerWorldRoutes(app: AppInstance): void {
       quests: journal.listQuests(id),
       clues: journal.listClues(id),
       progress: journal.progress(id, questValues(id)),
+      advance: journal.advances(id, WORLD_ADVANCE_BUDGET),
     });
   });
 
@@ -420,6 +423,99 @@ export function registerWorldRoutes(app: AppInstance): void {
       cast,
       conversationId: conversation?.id ?? null,
       messages,
+    });
+  });
+
+  /**
+   * 「下一步」：主角先不说话，让在场的人自己推一下局面。
+   *
+   * 两个约束：
+   * 1. 每章只有 WORLD_ADVANCE_BUDGET 次 —— 推得到过程，推不到结局；
+   * 2. 提示词里写死「不能回答本章的问题」—— 答案只能靠把话说对换来。
+   * 这样它就是「不知道问什么时的台阶」，而不是一路点到底的快捷方式。
+   */
+  app.post(`${WORLD_SCENES_ENDPOINT}/:id/next`, async (request) => {
+    const { id } = request.params as { id: string };
+    const scene = app.world().getScene(id);
+    if (!scene) throw AppError.notFound(`场景不存在: ${id}`);
+
+    const present = describePresent(id);
+    if (present.length === 0) throw AppError.validation('这个场景里现在没有人');
+
+    const save = app.world().getSave(scene.saveId);
+    app.journal().ensureMainline(scene.saveId, castOf(scene.saveId), save?.theme);
+    const quest = app.journal().activeQuest(scene.saveId);
+    const budget = app.journal().advances(scene.saveId, WORLD_ADVANCE_BUDGET);
+    if (budget.remaining <= 0) {
+      throw AppError.validation('这一章的世界已经走过两次了，接下来该你自己开口。');
+    }
+
+    const conversation =
+      app.conversations().findByScene(id) ??
+      app.conversations().create({
+        characterId: present[0]!.id,
+        title: scene.name,
+        sceneId: id,
+      });
+
+    // 让「这一章最该被追问的人」出头；他不在场就交给第一个在场的人
+    const focus = quest?.focusCharacterName;
+    const speaker =
+      present.find((person) => person.name === focus) ??
+      present[Math.floor(Math.random() * present.length)] ??
+      present[0]!;
+
+    const input = {
+      sceneName: scene.name,
+      kind: scene.kind,
+      question: quest?.question ?? '',
+      chapterTitle: quest?.title ?? '这一幕',
+      focusName: focus ?? null,
+      present: present.map((person) => person.name),
+      speaker: speaker.name,
+      time: budget.used + 1,
+      budget: WORLD_ADVANCE_BUDGET,
+    };
+
+    let text = '';
+    try {
+      const provider = resolveProvider(app);
+      const generated = await provider.chat(
+        {
+          model: provider.defaultModel,
+          messages: buildAdvancePrompt(input),
+          params: { temperature: 0.9 },
+        },
+        { requestId: request.id },
+      );
+      text = cleanOpening(generated.text);
+    } catch (error) {
+      request.log.warn({ err: error }, '「下一步」生成失败，使用兜底');
+    }
+    if (text.length === 0) text = fallbackAdvance(input);
+
+    const message = app.messages().append(conversation.id, {
+      role: 'assistant',
+      content: text,
+      kind: 'speak',
+      speakerId: speaker.id,
+      ...(conversation.activeLeafId ? { parentId: conversation.activeLeafId } : {}),
+    });
+    app.conversations().touch(conversation.id, message.id);
+    app.scriptEvents().recordFact(conversation.id, `advance:${message.id}`, `刚才：${text}`);
+
+    const remaining = app.journal().consumeAdvance(scene.saveId, WORLD_ADVANCE_BUDGET);
+
+    return success(request.id, {
+      message: {
+        id: message.id,
+        speakerId: speaker.id,
+        speakerName: speaker.name,
+        content: text,
+        createdAt: message.createdAt,
+      },
+      remaining,
+      budget: WORLD_ADVANCE_BUDGET,
     });
   });
 

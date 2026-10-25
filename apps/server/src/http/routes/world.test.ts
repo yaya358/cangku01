@@ -1055,6 +1055,98 @@ describe('存档快照：存档 / 读档', () => {
   });
 });
 
+describe('下一步：世界自己往前走', () => {
+  it('按下之后由在场的人说一句，消息落库、额度减一', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/next`,
+      });
+      expect(response.statusCode).toBe(200);
+      const data = response.json().data;
+      expect(data.budget).toBe(2);
+      expect(data.remaining).toBe(1);
+      expect(data.message.speakerName).toBe('月灯老板');
+      expect(String(data.message.content).length).toBeGreaterThan(0);
+
+      // 落进对话里（刷新还在），而且说话人是对的
+      const detail = await sceneDetail(app, sceneId);
+      const last = detail.messages.at(-1);
+      expect(last.content).toBe(data.message.content);
+      expect(last.role).toBe('assistant');
+      expect(last.speakerId).toBe(boss);
+
+      // 额度也反映在侧栏里
+      const journal = (
+        await app.inject({ method: 'GET', url: `/api/world/saves/${saveId}/journal` })
+      ).json().data;
+      expect(journal.advance).toEqual({ used: 1, remaining: 1 });
+    });
+  });
+
+  it('次数用完就推不动了：第三下直接被拦', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      expect(
+        (await app.inject({ method: 'POST', url: `/api/world/scenes/${sceneId}/next` })).statusCode,
+      ).toBe(200);
+      expect(
+        (await app.inject({ method: 'POST', url: `/api/world/scenes/${sceneId}/next` })).statusCode,
+      ).toBe(200);
+
+      const third = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/next`,
+      });
+      expect(third.statusCode).toBe(422);
+      expect(JSON.stringify(third.json())).toContain('该你自己开口');
+    });
+  });
+
+  /**
+   * 这条是「不许点下一步推到结局」的硬保证：
+   * 按满额度之后，章节状态一点没变，情报也一条没多。
+   */
+  it('推两下也过不了章：情报和好感都不动', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      for (let index = 0; index < 2; index += 1) {
+        await app.inject({ method: 'POST', url: `/api/world/scenes/${sceneId}/next` });
+      }
+
+      const journal = (
+        await app.inject({ method: 'GET', url: `/api/world/saves/${saveId}/journal` })
+      ).json().data;
+      expect(journal.chapter).toBe(1);
+      expect(journal.quest.status).toBe('active');
+      expect(journal.clues).toEqual([]);
+      expect(journal.progress.affinity).toBe(50);
+    });
+  });
+
+  it('场景里没人时不能推', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+      // 把人清走
+      app.world().leave(sceneId, boss, 1, null);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/next`,
+      });
+      expect(response.statusCode).toBe(422);
+    });
+  });
+});
+
 describe('好感度', () => {
   it('每轮结束打一次分，并把变化写进库', async () => {
     await withApp(async ({ app, scoreCalls }) => {

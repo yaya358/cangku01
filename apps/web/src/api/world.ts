@@ -10,6 +10,7 @@ import type {
   SaveStarted,
   SnapshotRestoreResult,
   Scene,
+  SceneAdvance,
   SceneDetail,
   SceneOpening,
 } from '@tavern/shared';
@@ -25,6 +26,7 @@ import {
   worldSnapshotEndpoint,
   worldSnapshotRestoreEndpoint,
   worldSceneEndpoint,
+  worldSceneNextEndpoint,
   worldSceneOpeningEndpoint,
   worldScenePrivateEndpoint,
   worldSceneReturnEndpoint,
@@ -105,6 +107,14 @@ export function removeSave(saveId: string): Promise<{ deleted: boolean }> {
   return apiDelete<{ deleted: boolean }>(worldSaveEndpoint(saveId));
 }
 
+/**
+ * 「下一步」：主角不开口，让在场的人自己推一下局面。
+ *
+ * 服务端会把这一句落库并返回剩余次数；次数用完就只能自己开口了。
+ */
+export function advanceScene(sceneId: string): Promise<SceneAdvance> {
+  return apiPost<SceneAdvance>(worldSceneNextEndpoint(sceneId), {}, { timeoutMs: 40_000 });
+}
 /** 场景详情：场景 + 在场者 + 名字对照表 + 当前分支的消息。 */
 export function fetchScene(id: string): Promise<SceneDetail> {
   return apiGet<SceneDetail>(worldSceneEndpoint(id), { timeoutMs: 15_000 });

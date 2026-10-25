@@ -96,5 +96,13 @@ export const JournalSchema = z.object({
   quests: z.array(QuestSchema),
   clues: z.array(ClueSchema),
   progress: QuestProgressSchema.nullable(),
+  /**
+   * 「下一步」还剩几次。放在 journal 里而不是单独一个接口：
+   * 它和章节绑定、翻章就重置，界面刷新时跟进度一起拿最省事。
+   */
+  advance: z.object({
+    remaining: z.number().int().nonnegative(),
+    budget: z.number().int().nonnegative(),
+  }),
 });
 export type Journal = z.infer<typeof JournalSchema>;

@@ -13,7 +13,9 @@ import type {
 import { AFFINITY_INITIAL } from '@tavern/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
+import { WORLD_ADVANCE_BUDGET } from '@tavern/shared';
 import {
+  advanceScene,
   createPrivateScene,
   ensureSceneOpening,
   fetchAffinity,
@@ -101,6 +103,10 @@ export const useSceneStore = defineStore('scene', () => {
   const journal = ref<Journal | null>(null);
   const loading = ref(false);
   const streaming = ref(false);
+  /** 「下一步」正在生成（和 streaming 分开：它不是玩家发言） */
+  const advancing = ref(false);
+  /** 这一章还能按几次「下一步」 */
+  const advanceRemaining = ref(WORLD_ADVANCE_BUDGET);
   const error = ref<string | null>(null);
 
   let controller: AbortController | null = null;
@@ -208,6 +214,7 @@ export const useSceneStore = defineStore('scene', () => {
     if (!current) return;
     try {
       journal.value = await fetchJournal(current.saveId);
+      advanceRemaining.value = journal.value.advance.remaining;
     } catch {
       // 侧栏读不到不影响说话；界面上就是空着
     }
@@ -504,6 +511,47 @@ export const useSceneStore = defineStore('scene', () => {
     }
   }
 
+  /**
+   * 「下一步」：主角不开口，让在场的人自己推一下局面。
+   *
+   * 服务端负责额度（每章两次）和「不许给答案」；这里只把落库的那一句插进对话，
+   * 并把剩余次数带回去给按钮显示。
+   */
+  async function advance(): Promise<number | null> {
+    const current = scene.value;
+    if (!current || streaming.value) return null;
+    advancing.value = true;
+    error.value = null;
+    try {
+      const result = await advanceScene(current.id);
+      messages.value.push({
+        id: result.message.id,
+        role: 'assistant',
+        content: result.message.content,
+        createdAt: result.message.createdAt,
+        kind: 'speak',
+        speakerId: result.message.speakerId,
+      });
+      if (
+        result.message.speakerId &&
+        !cast.value.some((item) => item.id === result.message.speakerId)
+      ) {
+        cast.value = [
+          ...cast.value,
+          { id: result.message.speakerId, name: result.message.speakerName ?? '某人' },
+        ];
+      }
+      advanceRemaining.value = result.remaining;
+      void loadJournal();
+      return result.remaining;
+    } catch (cause) {
+      error.value = describeError(cause);
+      return null;
+    } finally {
+      advancing.value = false;
+    }
+  }
+
   function stop(): void {
     controller?.abort();
   }
@@ -533,6 +581,9 @@ export const useSceneStore = defineStore('scene', () => {
     open,
     refresh,
     send,
+    advance,
+    advancing,
+    advanceRemaining,
     pullAway,
     goBack,
     stop,

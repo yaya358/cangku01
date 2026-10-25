@@ -163,6 +163,14 @@ export function worldSceneStreamEndpoint(id: string): string {
   return `${worldSceneEndpoint(id)}/stream`;
 }
 
+/**「下一步」：主角不开口，让在场的人推一下局面（每章有次数上限）。 */
+export function worldSceneNextEndpoint(id: string): string {
+  return `${worldSceneEndpoint(id)}/next`;
+}
+
+/** 每章能按几次「下一步」——推得到过程，推不到结局。 */
+export const WORLD_ADVANCE_BUDGET = 2;
+
 /** 第一次走进场景时，让世界先写一句开场（幂等）。 */
 export function worldSceneOpeningEndpoint(id: string): string {
   return `${worldSceneEndpoint(id)}/opening`;

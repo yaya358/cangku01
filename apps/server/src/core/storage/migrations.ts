@@ -690,6 +690,19 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('CREATE INDEX idx_snapshots_save ON save_snapshots (save_id, created_at DESC)');
     },
   },
+  {
+    version: 21,
+    name: 'quest-advances',
+    up: (db) => {
+      /**
+       * 「下一步」的额度。
+       *
+       * 记在章节上而不是全局：每翻一章自然重置，
+       * 也不用额外存「这一章用过几次」。
+       */
+      db.exec('ALTER TABLE quests ADD COLUMN advances_used INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

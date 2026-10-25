@@ -180,6 +180,14 @@ export interface JournalRepository {
   ) => { advanced: boolean; next: Quest | null; chapter: number };
   /** 存档当前章号 */
   chapterOf: (saveId: string) => number;
+  /**
+   * 「下一步」的额度：这一章还能让世界自己走几次。
+   *
+   * 记在章节行上（advances_used），翻章自然从 0 开始。
+   */
+  advances: (saveId: string, budget: number) => { used: number; remaining: number };
+  /** 用掉一次，返回用完之后还剩几次（不够就不扣） */
+  consumeAdvance: (saveId: string, budget: number) => number;
 }
 
 /**
@@ -318,6 +326,34 @@ export function createJournalRepository(
     activeQuest,
     listClues,
     chapterOf,
+
+    advances(saveId: string, budget: number): { used: number; remaining: number } {
+      const row = db
+        .prepare(
+          "SELECT advances_used FROM quests WHERE save_id = ? AND status != 'done' ORDER BY chapter ASC LIMIT 1",
+        )
+        .get(saveId) as { advances_used?: number } | undefined;
+      const used = Number(row?.advances_used ?? 0);
+      return { used, remaining: Math.max(0, budget - used) };
+    },
+
+    consumeAdvance(saveId: string, budget: number): number {
+      const quest = activeQuest(saveId);
+      if (!quest) return 0;
+      const used = Number(
+        (
+          db.prepare('SELECT advances_used FROM quests WHERE id = ?').get(quest.id) as
+            { advances_used?: number } | undefined
+        )?.advances_used ?? 0,
+      );
+      if (used >= budget) return 0;
+      db.prepare('UPDATE quests SET advances_used = ?, updated_at = ? WHERE id = ?').run(
+        used + 1,
+        now(),
+        quest.id,
+      );
+      return Math.max(0, budget - (used + 1));
+    },
 
     progress(saveId: string, values: QuestValues): QuestProgress | null {
       const quest = activeQuest(saveId);
