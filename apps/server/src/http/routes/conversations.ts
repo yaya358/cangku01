@@ -36,7 +36,7 @@ const SwipeSelectSchema = z.object({
 });
 
 /** zod 校验失败统一转成 422，并把字段级错误放进 details。 */
-function parseOrThrow<T>(schema: ZodType<T>, raw: unknown, message: string): T {
+export function parseOrThrow<T>(schema: ZodType<T>, raw: unknown, message: string): T {
   const parsed = schema.safeParse(raw ?? {});
   if (!parsed.success) {
     throw AppError.validation(
@@ -531,7 +531,7 @@ interface PipeOptions {
  * 写头 → 写 start → 转发 delta/usage/done → 出错写 error。
  * 差异只在最后怎么落库，那部分留给各自的调用方。
  */
-async function pipeProviderStream(options: PipeOptions): Promise<PipeResult> {
+export async function pipeProviderStream(options: PipeOptions): Promise<PipeResult> {
   const { raw, signal, provider, model, messages, traceId, meta } = options;
 
   raw.writeHead(200, {

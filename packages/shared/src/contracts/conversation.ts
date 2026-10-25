@@ -105,6 +105,8 @@ export const CreateConversationSchema = z.object({
   title: z.string().max(120).optional(),
   /** 可选：开局就带上身份 */
   player: PlayerSchema.partial().optional(),
+  /** 归属场景（世界模式）；一对一会话不填 */
+  sceneId: z.string().min(1).optional(),
   /** 传了就开成大厅：这些角色同时在场 */
   memberIds: z.array(z.string().min(1)).max(8).optional(),
 });

@@ -22,6 +22,8 @@ import type { Extension } from './core/extension/index.js';
 import { createProvidersFromConfig } from './core/provider/index.js';
 import { seedSampleCharacters } from './core/samples/index.js';
 import { createScriptEventRepository } from './core/script/repository.js';
+import { createWorldRepository } from './core/world/repository.js';
+import type { WorldRepository } from './core/world/repository.js';
 import type { ScriptEventRepository } from './core/script/repository.js';
 import { createSqliteStorage, resolveStoragePath } from './core/storage/index.js';
 import { createWorldbookRepository } from './core/worldbook/repository.js';
@@ -168,6 +170,13 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
     messageRepo ??= createMessageRepository(storage.db);
     return messageRepo;
+  });
+
+  let worldRepo: WorldRepository | null = null;
+  app.decorate('world', (): WorldRepository => {
+    if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
+    worldRepo ??= createWorldRepository(storage.db);
+    return worldRepo;
   });
 
   let scriptRepo: ScriptEventRepository | null = null;

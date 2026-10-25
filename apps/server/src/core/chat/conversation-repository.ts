@@ -25,6 +25,7 @@ interface ConversationRow {
   message_count: number;
   last_content: string | null;
   hall_members: string;
+  scene_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -77,6 +78,8 @@ export interface ConversationRepository {
   getById: (id: string) => Conversation | undefined;
   create: (input: CreateConversationInput) => Conversation;
   update: (id: string, patch: UpdateConversationInput) => Conversation | undefined;
+  /** 按场景取会话（场景第一次使用时创建） */
+  findByScene: (sceneId: string) => Conversation | undefined;
   /** 覆盖大厅成员（创建时补名字用） */
   setMembers: (id: string, members: { id: string; name: string }[]) => void;
   /** 生成完成写消息后调用，把会话顶到列表最前 */
@@ -124,12 +127,13 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
       const title = input.title?.trim() || '新的对话';
       const player = input.player ?? {};
       const members = input.memberIds ?? [];
+      const sceneId = input.sceneId ?? null;
 
       db.prepare(
         `INSERT INTO conversations (
            id, character_id, title, active_leaf_id,
-           player_name, player_role, player_goal, hall_members, created_at, updated_at
-         ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+           player_name, player_role, player_goal, hall_members, scene_id, created_at, updated_at
+         ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.characterId,
@@ -138,6 +142,7 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
         player.role ?? '',
         player.goal ?? '',
         JSON.stringify(members.map((id) => ({ id, name: '' }))),
+        sceneId,
         now,
         now,
       );
@@ -181,6 +186,13 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
       db.prepare(`UPDATE conversations SET ${assignments.join(', ')} WHERE id = ?`).run(...values);
 
       return getById(id);
+    },
+
+    findByScene(sceneId: string): Conversation | undefined {
+      const row = db
+        .prepare(`${baseSelect} WHERE c.scene_id = ? ORDER BY c.created_at ASC LIMIT 1`)
+        .get(sceneId) as unknown as ConversationRow | undefined;
+      return row ? rowToConversation(row) : undefined;
     },
 
     setMembers(id: string, members: { id: string; name: string }[]): void {
