@@ -18,7 +18,14 @@ export interface SampleCard {
   avatarKey: string;
   card: Record<string, unknown>;
   /** 内置小剧本：到第几轮发生什么事（播种时一并写入） */
-  events?: { atTurn: number; title: string; content: string }[];
+  events?: {
+    atTurn: number;
+    title: string;
+    content: string;
+    condition?: string;
+    isEnding?: boolean;
+    sets?: string;
+  }[];
 }
 
 /** 少写点重复结构：把常用字段拼成 V2 卡。 */
@@ -67,12 +74,18 @@ export const SAMPLE_CARDS: SampleCard[] = [
       {
         atTurn: 6,
         title: '一张旧通缉令',
+        // 条件触发：玩家得先提到那件事，这一幕才发生
+        condition: '十四年前, 通缉令, 旧事',
         content:
           '老头从怀里摸出一张折得发白的纸，摊在柜台上——那是一张十四年前的通缉令，画像上的脸年轻、没有胡须，但眼睛和老板一模一样。老头说：我找了你十四年。',
       },
       {
         atTurn: 9,
         title: '他认了',
+        // 结局：触发后这一场就算演完
+        isEnding: true,
+        // 状态写入：之后每一轮它都不能再装没事人
+        sets: '老板已经当面承认：十四年前他是刽子手，那件旧外套就是当年的制服。',
         content:
           '老板把围裙解下来，慢慢叠好，放在柜台上。他没有辩解，只说了一句：那杯酒，你替我留着。（转身看向后厨的门）',
       },

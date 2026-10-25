@@ -21,6 +21,12 @@ export const ScriptEventSchema = z.object({
   title: z.string(),
   /** 注入上下文的描述：发生了什么 */
   content: z.string(),
+  /** 条件关键词（逗号分隔）：非空时还要求玩家说过其中某个词 */
+  condition: z.string(),
+  /** 这一幕是结局 */
+  isEnding: z.boolean(),
+  /** 触发后写入的剧情事实（会一直注入后续对话） */
+  sets: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -30,6 +36,9 @@ export const ScriptEventInputSchema = z.object({
   atTurn: z.number().int().min(1).max(500),
   title: z.string().min(1, '标题不能为空').max(80),
   content: z.string().min(1, '内容不能为空').max(MAX_CONTENT),
+  condition: z.string().max(200).default(''),
+  isEnding: z.boolean().default(false),
+  sets: z.string().max(400).default(''),
 });
 export type ScriptEventInput = z.infer<typeof ScriptEventInputSchema>;
 
@@ -42,5 +51,15 @@ export const EventNoticeSchema = z.object({
   title: z.string(),
   content: z.string(),
   atTurn: z.number().int(),
+  /** 这一幕是结局 */
+  isEnding: z.boolean(),
 });
 export type EventNotice = z.infer<typeof EventNoticeSchema>;
+
+/** 会话里已经成立的剧情事实。 */
+export const ConversationFactSchema = z.object({
+  content: z.string(),
+  sourceEventId: z.string(),
+  createdAt: z.string(),
+});
+export type ConversationFact = z.infer<typeof ConversationFactSchema>;

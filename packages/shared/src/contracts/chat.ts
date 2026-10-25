@@ -119,6 +119,8 @@ export type ChatStreamPayload =
       title: string;
       content: string;
       atTurn: number;
+      /** 这一幕是结局 */
+      isEnding: boolean;
     }
   | { type: 'error'; code: string; message: string; retryable: boolean };
 

@@ -27,12 +27,14 @@
       >
         <span class="act__turn">第 {{ event.atTurn }} 轮</span>
         <span class="act__title">{{ event.title }}</span>
-        <span v-if="index === events.length - 1" class="act__ending">结局</span>
+        <span v-if="event.isEnding" class="act__ending">结局</span>
+        <span v-if="event.condition" class="act__cond">需提到：{{ event.condition }}</span>
         <span class="act__actions">
           <button class="tool" type="button" @click="edit(event)">改</button>
           <button class="tool tool--danger" type="button" @click="remove(event)">删除</button>
         </span>
         <p class="act__content">{{ event.content }}</p>
+        <p v-if="event.sets" class="act__sets">触发后记住：{{ event.sets }}</p>
       </li>
     </ul>
 
@@ -63,6 +65,26 @@
         :autosize="{ minRows: 2, maxRows: 5 }"
         placeholder="发生了什么（会被注入上下文，让角色对它做出反应）"
       />
+
+      <!-- 条件与结局：条件让「说到才发生」，结局让这一场能收尾 -->
+      <div class="editor__row">
+        <n-input
+          v-model:value="draftCondition"
+          size="small"
+          placeholder="触发条件（可选，逗号分隔；空=到轮次就发生）"
+        />
+        <label class="toggle">
+          <n-switch v-model:value="draftEnding" size="small" />
+          <span>这一幕是结局</span>
+        </label>
+      </div>
+
+      <n-input
+        v-model:value="draftSets"
+        size="small"
+        placeholder="触发后记住什么（可选，例如：他已经承认那晚他睡着了）"
+      />
+
       <div class="editor__foot">
         <span class="editor__tip">
           {{ editingId ? '正在改这一幕' : '轮次 = 玩家第几次发言' }}
@@ -101,6 +123,12 @@ const editingId = ref<string | null>(null);
 const draftTurn = ref(3);
 const draftTitle = ref('');
 const draftContent = ref('');
+/** 条件关键词（逗号分隔）；空 = 到轮次就触发 */
+const draftCondition = ref('');
+/** 这一幕是结局 */
+const draftEnding = ref(false);
+/** 触发后写入的剧情事实 */
+const draftSets = ref('');
 
 /** 下一幕默认排在本轮之后，少改一次数字。 */
 function nextTurn(): number {
@@ -113,6 +141,9 @@ function resetDraft(): void {
   draftTurn.value = nextTurn();
   draftTitle.value = '';
   draftContent.value = '';
+  draftCondition.value = '';
+  draftEnding.value = false;
+  draftSets.value = '';
   error.value = null;
 }
 
@@ -134,6 +165,9 @@ function edit(event: ScriptEvent): void {
   draftTurn.value = event.atTurn;
   draftTitle.value = event.title;
   draftContent.value = event.content;
+  draftCondition.value = event.condition;
+  draftEnding.value = event.isEnding;
+  draftSets.value = event.sets;
 }
 
 async function save(): Promise<void> {
@@ -147,7 +181,14 @@ async function save(): Promise<void> {
   saving.value = true;
   error.value = null;
   try {
-    const payload = { atTurn: draftTurn.value, title, content };
+    const payload = {
+      atTurn: draftTurn.value,
+      title,
+      content,
+      condition: draftCondition.value.trim(),
+      isEnding: draftEnding.value,
+      sets: draftSets.value.trim(),
+    };
     if (editingId.value) await updateScriptEvent(editingId.value, payload);
     else await createScriptEvent(props.characterId, payload);
 
@@ -254,6 +295,21 @@ onMounted(() => {
   border-left-color: var(--err);
 }
 
+.act__cond {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(224, 167, 94, 0.14);
+  color: var(--warn);
+  font-size: 10.5px;
+}
+
+.act__sets {
+  flex-basis: 100%;
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
 .act__turn {
   color: var(--accent);
   font-family: var(--font-mono);
@@ -340,5 +396,15 @@ onMounted(() => {
 .editor__actions {
   display: flex;
   gap: 8px;
+}
+
+.toggle {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 </style>

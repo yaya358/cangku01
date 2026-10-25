@@ -26,6 +26,8 @@ export interface PrepareInput {
   player?: { name?: string; role?: string; goal?: string };
   /** 本轮触发的剧本事件（到点发生的剧情） */
   events?: readonly { id: string; title: string; content: string; turn?: number }[];
+  /** 已经成立的剧情事实（例如「他已经承认了」），每轮都注入 */
+  facts?: readonly string[];
   budget?: Partial<Pick<ContextBudget, 'contextWindow' | 'reservedForOutput' | 'safetyMargin'>>;
   /** 扫描世界书时往回看几条历史，默认 6 */
   historyScanDepth?: number;
@@ -98,6 +100,7 @@ export function prepareConversationContext(input: PrepareInput): PreparedContext
     userInput,
     worldbook: toWorldbookLayers(worldbook.hits),
     ...(input.events && input.events.length > 0 ? { events: input.events } : {}),
+    ...(input.facts && input.facts.length > 0 ? { facts: input.facts } : {}),
     userName: input.userName,
     ...(input.player ? { player: input.player } : {}),
     budget: input.budget,

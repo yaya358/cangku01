@@ -88,7 +88,17 @@ export function seedSampleCharacters(app: AppInstance): SeedResult {
 function SeedScriptEvents(
   app: AppInstance,
   characterId: string,
-  sample: { name: string; events?: readonly { atTurn: number; title: string; content: string }[] },
+  sample: {
+    name: string;
+    events?: readonly {
+      atTurn: number;
+      title: string;
+      content: string;
+      condition?: string;
+      isEnding?: boolean;
+      sets?: string;
+    }[];
+  },
 ): void {
   if (!sample.events || sample.events.length === 0) return;
 
@@ -101,6 +111,9 @@ function SeedScriptEvents(
         atTurn: event.atTurn,
         title: event.title,
         content: event.content,
+        condition: event.condition ?? '',
+        isEnding: event.isEnding ?? false,
+        sets: event.sets ?? '',
       });
     }
   } catch (error) {

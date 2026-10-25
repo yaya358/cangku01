@@ -225,15 +225,30 @@ export function registerConversationRoutes(app: AppInstance): void {
      *
      * 「第 N 轮」= 玩家第 N 次发言（含刚写的这句）。
      * 已经触发过的记在 conversation_events 里，同一轮不会重复发生。
+     * 条件关键词看的是「本轮输入 + 最近历史」——
+     * 只看本轮会漏掉「上一句提到了那件事、这一句在等反应」的情况。
      */
     const turn = history.filter((message) => message.role === 'user').length + 1;
     const scriptRepo = app.scriptEvents();
+    const scanText = [
+      body.content,
+      ...history
+        .slice(-6)
+        .filter((message) => message.role === 'user')
+        .map((message) => message.content),
+    ].join('\n');
+
     const firedEvents = pickEventsToFire({
       events: scriptRepo.listByCharacter(character.id),
       fired: scriptRepo.firedIds(id),
       turn,
+      text: scanText,
     });
-    for (const event of firedEvents) scriptRepo.markFired(id, event.id);
+    for (const event of firedEvents) {
+      scriptRepo.markFired(id, event.id);
+      // 结局/关键一幕可能把状态写进会话：之后的对话都能看到
+      scriptRepo.recordFact(id, event.id, event.sets);
+    }
 
     const prepared = prepareConversationContext({
       character,
@@ -242,6 +257,8 @@ export function registerConversationRoutes(app: AppInstance): void {
       userName: body.userName ?? conversation.player.name,
       // 这一轮你是谁来、图什么 —— 决定角色会戒备、讨好还是试探
       player: conversation.player,
+      // 已经成立的剧情事实（比如「他已经承认了」）
+      facts: scriptRepo.facts(id),
       ...(firedEvents.length > 0 ? { events: toEventLayers(firedEvents) } : {}),
     });
 
@@ -271,6 +288,7 @@ export function registerConversationRoutes(app: AppInstance): void {
         title: event.title,
         content: event.content,
         atTurn: event.atTurn,
+        isEnding: event.isEnding,
       })),
       onError: (error) => {
         request.log.error({ err: error }, '会话生成异常');
@@ -458,7 +476,13 @@ interface PipeOptions {
     worldbookHits?: number;
   };
   /** 剧本事件提示：在正文之前发给前端 */
-  notices?: readonly { eventId: string; title: string; content: string; atTurn: number }[];
+  notices?: readonly {
+    eventId: string;
+    title: string;
+    content: string;
+    atTurn: number;
+    isEnding: boolean;
+  }[];
   onError?: (error: unknown) => void;
 }
 

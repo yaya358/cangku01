@@ -219,6 +219,36 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 8,
+    name: 'script-conditions-and-facts',
+    up: (db) => {
+      /**
+       * 剧本升级：条件触发、结局标记、状态写入。
+       *
+       *   condition —— 触发条件关键词（逗号分隔）。空 = 到轮次就触发；
+       *                非空 = 还要玩家说过其中任意一个词（比如「那晚」「灯」）
+       *   is_ending —— 这一幕是结局：触发后这一场戏就算演完
+       *   sets      —— 触发后写入的「事实」，会一直注入后续对话。
+       *                例如「老周已经承认那晚他睡着了」——
+       *                没有它，下一轮角色又会装作没说过。
+       */
+      db.exec("ALTER TABLE script_events ADD COLUMN condition TEXT NOT NULL DEFAULT ''");
+      db.exec('ALTER TABLE script_events ADD COLUMN is_ending INTEGER NOT NULL DEFAULT 0');
+      db.exec("ALTER TABLE script_events ADD COLUMN sets TEXT NOT NULL DEFAULT ''");
+
+      // 会话级的剧情事实：一次写入，之后每轮都注入
+      db.exec(`
+        CREATE TABLE conversation_facts (
+          conversation_id TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
+          source_event_id TEXT NOT NULL,
+          content         TEXT NOT NULL,
+          created_at      TEXT NOT NULL,
+          PRIMARY KEY (conversation_id, source_event_id)
+        )
+      `);
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

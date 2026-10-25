@@ -25,6 +25,8 @@ const PRIORITY = {
   userPersona: 730,
   // 剧本事件：这一轮刚发生的事，比场景和世界书都更该被看到
   event: 690,
+  // 剧情事实：已经算数的事，丢了角色就会「翻脸不认」
+  fact: 685,
   scenario: 650,
   worldbook: 600,
   summary: 500,
@@ -203,7 +205,30 @@ function collectLayers(input: AssembleInput, charName: string, userName: string)
   }
 
   /**
-   * 5. 剧本事件（这一轮到点了，发生了什么）。
+   * 5. 剧情事实（已经成立的事）。
+   *
+   * 这段必须写成「不可推翻」：模型很容易在下一轮把刚才发生的事当成没发生，
+   * 于是玩家说「你刚才承认了」，它又装回去。
+   */
+  if (input.facts && input.facts.length > 0) {
+    layers.push(
+      makeLayer({
+        id: 'facts',
+        kind: 'fact',
+        title: '已经发生的事',
+        content: [
+          '【已经发生的事】',
+          ...input.facts.map((fact) => `- ${substitute(fact, charName, userName)}`),
+          '这些事已经发生、无法否认，你的言行必须与之一致，不要装作没发生过。',
+        ].join('\n'),
+        priority: PRIORITY.fact,
+        splittable: false,
+      }),
+    );
+  }
+
+  /**
+   * 6. 剧本事件（这一轮到点了，发生了什么）。
    *
    * 关键在最后那句指令：只描述「有人推门进来」还不够，
    * 模型可能当旁白念一遍就继续闲聊 —— 必须明确要求它对这件事做出反应。
@@ -383,6 +408,7 @@ function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
         layer.kind === 'scenario' ||
         layer.kind === 'motive' ||
         layer.kind === 'event' ||
+        layer.kind === 'fact' ||
         layer.kind === 'worldbook' ||
         layer.kind === 'summary',
     )

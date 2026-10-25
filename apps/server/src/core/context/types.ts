@@ -24,6 +24,8 @@ export type LayerKind =
   | 'user_persona'
   /** 剧本事件：这一轮到点了，发生了什么事 */
   | 'event'
+  /** 剧情事实：已经发生并成立的事（承认了、走了、死了） */
+  | 'fact'
   | 'worldbook'
   | 'summary'
   | 'history'
@@ -121,6 +123,13 @@ export interface AssembleInput {
    * 前者是背景，后者是剧情推进。
    */
   events?: readonly { id: string; title: string; content: string; turn?: number }[];
+  /**
+   * 已经成立的剧情事实。
+   *
+   * 和事件的区别：事件是「刚刚发生」，事实是「已经算数、之后都不能反悔」——
+   * 没有它，角色在你说「你刚才承认了」之后又会变回没事人。
+   */
+  facts?: readonly string[];
   /** 滚动摘要（阶段 6 接入） */
   summary?: string;
   /** 预算参数 */
