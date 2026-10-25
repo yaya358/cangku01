@@ -20,6 +20,8 @@ export type LayerKind =
   | 'scenario'
   /** 秘密与目的：让角色有戏、会主动出招 */
   | 'motive'
+  /** 玩家身份：你是谁、你图什么 —— 决定角色怎么对你说话 */
+  | 'user_persona'
   | 'worldbook'
   | 'summary'
   | 'history'
@@ -96,6 +98,18 @@ export interface AssembleInput {
   history: readonly ChatMessage[];
   /** 本轮用户输入 */
   userInput: string;
+  /**
+   * 玩家身份：你是谁来、你图什么。
+   * 不填时角色会把你当陌生人 —— 这是「对谁都客套」的根源。
+   */
+  player?: {
+    /** 名字，默认「旅人」 */
+    name?: string;
+    /** 身份，例如「来讨债的」 */
+    role?: string;
+    /** 目的，例如「让他承认十四年前那件事」 */
+    goal?: string;
+  };
   /** 世界书命中条目（阶段 4 第三个提交接入） */
   worldbook?: readonly { id: string; title: string; content: string; keywords?: string[] }[];
   /** 滚动摘要（阶段 6 接入） */

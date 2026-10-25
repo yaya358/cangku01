@@ -1,4 +1,10 @@
-import type { BranchSummary, ChatStreamPayload, Conversation, Message } from '@tavern/shared';
+import type {
+  BranchSummary,
+  ChatStreamPayload,
+  Conversation,
+  Message,
+  Player,
+} from '@tavern/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { ApiError } from '@/api/client';
@@ -11,6 +17,7 @@ import {
   selectSwipe,
   sendTurn,
   switchBranch as switchBranchApi,
+  updatePlayer as updatePlayerApi,
 } from '@/api/conversations';
 
 /** 渲染用的消息：库里来的 + 正在流式生成的那条。 */
@@ -121,6 +128,35 @@ export const useChatStore = defineStore('chat', () => {
     } catch (cause) {
       error.value = describeError(cause);
       return null;
+    }
+  }
+
+  /**
+   * 带着身份开一场：先建会话（写入 player），再进入。
+   *
+   * 不复用旧会话 —— 换了身份就是另一场戏，混在一起上下文会乱。
+   */
+  async function startWithPlayer(characterId: string, player: Player): Promise<string | null> {
+    error.value = null;
+    try {
+      const created = await createConversation(characterId, undefined, player);
+      return created.id;
+    } catch (cause) {
+      error.value = describeError(cause);
+      return null;
+    }
+  }
+
+  /** 改这一场的身份，之后每一轮都按新身份组装。 */
+  async function updatePlayer(player: Partial<Player>): Promise<void> {
+    const current = conversation.value;
+    if (!current) return;
+    try {
+      const updated = await updatePlayerApi(current.id, player);
+      conversation.value = updated;
+      branchFrom.value = null;
+    } catch (cause) {
+      error.value = describeError(cause);
     }
   }
 
@@ -367,6 +403,8 @@ export const useChatStore = defineStore('chat', () => {
     loadList,
     open,
     startWith,
+    startWithPlayer,
+    updatePlayer,
     send,
     regenerate,
     switchSwipe,

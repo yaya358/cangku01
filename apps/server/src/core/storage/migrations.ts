@@ -170,6 +170,21 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("ALTER TABLE characters ADD COLUMN goal TEXT NOT NULL DEFAULT ''");
     },
   },
+  {
+    version: 6,
+    name: 'conversation-player',
+    up: (db) => {
+      /**
+       * 玩家身份：这一轮里「你是谁、你图什么」。
+       *
+       * 放在会话上而不是全局：同一个角色，你换一个身份就是另一场戏。
+       * 没有它，角色只能对「旅人」说客套话；有了它，它的目的才会针对你出招。
+       */
+      db.exec("ALTER TABLE conversations ADD COLUMN player_name TEXT NOT NULL DEFAULT ''");
+      db.exec("ALTER TABLE conversations ADD COLUMN player_role TEXT NOT NULL DEFAULT ''");
+      db.exec("ALTER TABLE conversations ADD COLUMN player_goal TEXT NOT NULL DEFAULT ''");
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

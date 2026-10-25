@@ -44,6 +44,17 @@ export const MessageSchema = z.object({
 });
 export type Message = z.infer<typeof MessageSchema>;
 
+/** 玩家在这一轮里的身份（决定角色怎么对你说话）。 */
+export const PlayerSchema = z.object({
+  /** 名字，进 prompt 的 {{user}} */
+  name: z.string().max(40),
+  /** 身份，例如「来讨债的」 */
+  role: z.string().max(200),
+  /** 你图什么，例如「让他承认十四年前那件事」 */
+  goal: z.string().max(400),
+});
+export type Player = z.infer<typeof PlayerSchema>;
+
 /** 会话（列表用，带统计信息）。 */
 export const ConversationSchema = z.object({
   id: z.string(),
@@ -53,6 +64,8 @@ export const ConversationSchema = z.object({
   title: z.string(),
   /** 当前对话树所在的叶子，恢复上下文时用 */
   activeLeafId: z.string().nullable(),
+  /** 玩家身份；三项都为空表示没设定 */
+  player: PlayerSchema,
   messageCount: z.number().int().nonnegative(),
   /** 最后一条消息的摘要，列表里显示 */
   preview: z.string(),
@@ -65,13 +78,16 @@ export type Conversation = z.infer<typeof ConversationSchema>;
 export const CreateConversationSchema = z.object({
   characterId: z.string().min(1),
   title: z.string().max(120).optional(),
+  /** 可选：开局就带上身份 */
+  player: PlayerSchema.partial().optional(),
 });
 export type CreateConversationInput = z.infer<typeof CreateConversationSchema>;
 
-/** 改标题。 */
+/** 改标题 / 切分支 / 改身份。 */
 export const UpdateConversationSchema = z.object({
   title: z.string().min(1).max(120).optional(),
   activeLeafId: z.string().nullable().optional(),
+  player: PlayerSchema.partial().optional(),
 });
 export type UpdateConversationInput = z.infer<typeof UpdateConversationSchema>;
 

@@ -1,4 +1,10 @@
-import type { ChatStreamPayload, Conversation, ConversationDetail, Message } from '@tavern/shared';
+import type {
+  ChatStreamPayload,
+  Conversation,
+  ConversationDetail,
+  Message,
+  Player,
+} from '@tavern/shared';
 import {
   CONVERSATIONS_ENDPOINT,
   conversationEndpoint,
@@ -22,11 +28,21 @@ export function listConversations(characterId?: string): Promise<Conversation[]>
   return apiGet<Conversation[]>(`${CONVERSATIONS_ENDPOINT}${suffix}`, { timeoutMs: 10_000 });
 }
 
-export function createConversation(characterId: string, title?: string): Promise<Conversation> {
+export function createConversation(
+  characterId: string,
+  title?: string,
+  player?: Partial<Player>,
+): Promise<Conversation> {
   return apiPost<Conversation>(CONVERSATIONS_ENDPOINT, {
     characterId,
     ...(title ? { title } : {}),
+    ...(player ? { player } : {}),
   });
+}
+
+/** 改动玩家身份（之后每一轮都按新身份组装上下文）。 */
+export function updatePlayer(id: string, player: Partial<Player>): Promise<Conversation> {
+  return apiPatch<Conversation>(conversationEndpoint(id), { player });
 }
 
 /** 读取会话。传 leafId 可以临时看某一支（不改会话状态）。 */

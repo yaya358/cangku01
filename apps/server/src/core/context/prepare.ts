@@ -22,6 +22,8 @@ export interface PrepareInput {
   /** 完整对话，最后一条应当是本次用户输入 */
   messages: readonly ChatMessage[];
   userName?: string;
+  /** 玩家身份：你是谁、你图什么。不传时角色会把你当陌生人 */
+  player?: { name?: string; role?: string; goal?: string };
   budget?: Partial<Pick<ContextBudget, 'contextWindow' | 'reservedForOutput' | 'safetyMargin'>>;
   /** 扫描世界书时往回看几条历史，默认 6 */
   historyScanDepth?: number;
@@ -94,6 +96,7 @@ export function prepareConversationContext(input: PrepareInput): PreparedContext
     userInput,
     worldbook: toWorldbookLayers(worldbook.hits),
     userName: input.userName,
+    ...(input.player ? { player: input.player } : {}),
     budget: input.budget,
   });
 

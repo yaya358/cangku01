@@ -19,6 +19,9 @@ interface ConversationRow {
   character_name: string;
   title: string;
   active_leaf_id: string | null;
+  player_name: string;
+  player_role: string;
+  player_goal: string;
   message_count: number;
   last_content: string | null;
   created_at: string;
@@ -41,6 +44,11 @@ function rowToConversation(row: ConversationRow): Conversation {
     characterName: row.character_name,
     title: row.title,
     activeLeafId: row.active_leaf_id,
+    player: {
+      name: row.player_name ?? '',
+      role: row.player_role ?? '',
+      goal: row.player_goal ?? '',
+    },
     messageCount: Number(row.message_count ?? 0),
     preview: toPreview(row.last_content),
     createdAt: row.created_at,
@@ -62,6 +70,7 @@ export interface ConversationRepository {
 export function createConversationRepository(db: DatabaseSync): ConversationRepository {
   const baseSelect = `
     SELECT c.id, c.character_id, ch.name AS character_name, c.title, c.active_leaf_id,
+           c.player_name, c.player_role, c.player_goal,
            c.created_at, c.updated_at,
            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
            (SELECT m.content FROM messages m WHERE m.conversation_id = c.id
@@ -95,11 +104,23 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
       const id = randomUUID();
       const now = new Date().toISOString();
       const title = input.title?.trim() || '新的对话';
+      const player = input.player ?? {};
 
       db.prepare(
-        `INSERT INTO conversations (id, character_id, title, active_leaf_id, created_at, updated_at)
-         VALUES (?, ?, ?, NULL, ?, ?)`,
-      ).run(id, input.characterId, title, now, now);
+        `INSERT INTO conversations (
+           id, character_id, title, active_leaf_id,
+           player_name, player_role, player_goal, created_at, updated_at
+         ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        input.characterId,
+        title,
+        player.name ?? '',
+        player.role ?? '',
+        player.goal ?? '',
+        now,
+        now,
+      );
 
       const created = getById(id);
       if (!created) throw new Error(`会话写入后读不回来（id=${id}）`);
@@ -120,6 +141,18 @@ export function createConversationRepository(db: DatabaseSync): ConversationRepo
       if (patch.activeLeafId !== undefined) {
         assignments.push('active_leaf_id = ?');
         values.push(patch.activeLeafId);
+      }
+      // 身份三项各自独立更新：只改目标时不该把名字清空
+      const playerFields: Array<['name' | 'role' | 'goal', string]> = [
+        ['name', 'player_name'],
+        ['role', 'player_role'],
+        ['goal', 'player_goal'],
+      ];
+      for (const [field, column] of playerFields) {
+        const next = patch.player?.[field];
+        if (next === undefined) continue;
+        assignments.push(`${column} = ?`);
+        values.push(next);
       }
       if (assignments.length === 0) return existing;
 

@@ -11,6 +11,20 @@
         <div>
           <h1 class="chat__name">{{ character.name }}</h1>
           <p class="chat__sub">{{ store.title }} · {{ messages.length }} 条消息</p>
+          <!-- 这一场你是谁：身份会进 prompt，决定角色怎么对你说话 -->
+          <p v-if="hasPlayer" class="chat__me">
+            你是
+            <strong>{{ conversation?.player.name || '无名' }}</strong>
+            <span v-if="conversation?.player.role">· {{ conversation.player.role }}</span>
+            <span v-if="conversation?.player.goal" class="chat__goal">
+              · 目标：{{ conversation.player.goal }}
+            </span>
+            <button class="tool" type="button" @click="identityOpen = true">改身份</button>
+          </p>
+          <p v-else class="chat__me chat__me--empty">
+            还没设定身份 —— 角色只能把你当陌生人。
+            <button class="tool" type="button" @click="identityOpen = true">设定身份</button>
+          </p>
         </div>
       </div>
 
@@ -136,16 +150,25 @@
         <span class="chat__hint">每轮都会落库，刷新页面记录还在</span>
       </div>
     </div>
+
+    <!-- 改身份：改完下一轮就按新身份组装上下文 -->
+    <PlayerIdentityModal
+      v-model:show="identityOpen"
+      :initial="conversation?.player"
+      confirm-text="保存"
+      @submit="onIdentitySubmit"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import type { Character } from '@tavern/shared';
+import type { Character, Player } from '@tavern/shared';
 import { NAlert, NButton, NInput, NSpin } from 'naive-ui';
 import { storeToRefs } from 'pinia';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { fetchCharacter } from '@/api/characters';
+import PlayerIdentityModal from '@/components/PlayerIdentityModal.vue';
 import { useChatStore } from '@/stores/chat';
 
 const route = useRoute();
@@ -156,6 +179,20 @@ const { messages, loading, streaming, error, conversation, isEmpty, branches, br
 const draft = ref('');
 const character = ref<Character | null>(null);
 const logRef = ref<HTMLElement | null>(null);
+/** 身份编辑弹窗 */
+const identityOpen = ref(false);
+
+/** 三项都没填就当没设定身份。 */
+const hasPlayer = computed(() => {
+  const player = conversation.value?.player;
+  if (!player) return false;
+  return Boolean(player.name || player.role || player.goal);
+});
+
+async function onIdentitySubmit(player: Player): Promise<void> {
+  await store.updatePlayer(player);
+  identityOpen.value = false;
+}
 
 const canSend = computed(
   () => !streaming.value && !!conversation.value && draft.value.trim().length > 0,
@@ -284,6 +321,32 @@ onBeforeUnmount(() => {
 .chat__sub {
   color: var(--text-faint);
   font-size: 11.5px;
+}
+
+.chat__me {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  color: var(--accent);
+  font-size: 11.5px;
+}
+
+.chat__me strong {
+  font-weight: 600;
+}
+
+.chat__me .tool {
+  margin-left: 4px;
+}
+
+.chat__goal {
+  color: var(--text-dim);
+}
+
+.chat__me--empty {
+  color: var(--text-faint);
 }
 
 .chat__actions {

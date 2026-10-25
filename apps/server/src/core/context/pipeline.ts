@@ -21,6 +21,8 @@ const PRIORITY = {
   persona: 700,
   // 秘密与目的比场景重要：丢了它角色就退回「问一句答一句」
   motive: 680,
+  // 玩家身份：决定角色对谁说话，丢了就变成对陌生人客套
+  userPersona: 730,
   scenario: 650,
   worldbook: 600,
   summary: 500,
@@ -98,7 +100,38 @@ function collectLayers(input: AssembleInput, charName: string, userName: string)
     }),
   );
 
-  // 2. 角色人设：名字 + 描述 + 性格
+  /**
+   * 2. 玩家身份。
+   *
+   * 没有这一层时，角色只能对「一个陌生人」说话，于是全是客套。
+   * 有了身份与目的，它才知道该戒备、该讨好还是该试探。
+   */
+  const playerRole = input.player?.role?.trim() ?? '';
+  const playerGoal = input.player?.goal?.trim() ?? '';
+  if (playerRole.length > 0 || playerGoal.length > 0) {
+    const parts = [`【坐在你对面的人】${userName}`];
+    if (playerRole.length > 0) parts.push(`身份：${substitute(playerRole, charName, userName)}`);
+    if (playerGoal.length > 0) {
+      parts.push(`此人想要：${substitute(playerGoal, charName, userName)}`);
+    }
+    parts.push(
+      '把对方当成这个身份来对待 —— 该戒备就戒备，该试探就试探，' +
+        '不要把他当成第一次见面的陌生人寒暄。',
+    );
+
+    layers.push(
+      makeLayer({
+        id: 'user_persona',
+        kind: 'user_persona',
+        title: '玩家身份',
+        content: parts.join('\n'),
+        priority: PRIORITY.userPersona,
+        splittable: false,
+      }),
+    );
+  }
+
+  // 3. 角色人设：名字 + 描述 + 性格
   const personaParts: string[] = [`【角色】${charName}`];
   if (character.description.trim().length > 0) personaParts.push(character.description.trim());
   if (character.personality.trim().length > 0) {
@@ -320,6 +353,7 @@ function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
       (layer) =>
         layer.kind === 'system' ||
         layer.kind === 'persona' ||
+        layer.kind === 'user_persona' ||
         layer.kind === 'scenario' ||
         layer.kind === 'motive' ||
         layer.kind === 'worldbook' ||
@@ -358,7 +392,11 @@ function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
 /** 组装入口。 */
 export function assembleContext(input: AssembleInput): AssembledContext {
   const charName = input.character.name.trim() || '角色';
-  const userName = input.userName?.trim() || '你';
+  /**
+   * 玩家称呼的优先级：显式传入 > 身份里的名字 > 「你」。
+   * 设定身份时通常也会设名字，两者不一致时以显式传入为准。
+   */
+  const userName = input.userName?.trim() || input.player?.name?.trim() || '你';
 
   const layers = collectLayers(input, charName, userName);
 

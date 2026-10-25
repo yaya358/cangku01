@@ -272,6 +272,14 @@
       :character-id="character.id"
       :character-name="character.name"
     />
+
+    <!-- 开局选身份：这一场你是谁、图什么 -->
+    <PlayerIdentityModal
+      v-model:show="identityOpen"
+      :saving="startingChat"
+      confirm-text="开始这一场"
+      @submit="onIdentitySubmit"
+    />
   </section>
 </template>
 
@@ -284,6 +292,7 @@ import { updateCharacter, exportCardJson, exportCardPngUrl, uploadAvatar } from 
 import { toAvatarPng } from '@/api/avatar';
 import ContextPreviewDrawer from '@/components/ContextPreviewDrawer.vue';
 import WorldbookPanel from '@/components/WorldbookPanel.vue';
+import PlayerIdentityModal from '@/components/PlayerIdentityModal.vue';
 import { useChatStore } from '@/stores/chat';
 import { useCharacterStore } from '@/stores/characters';
 import { formatDateTime } from '@/utils/format';
@@ -306,6 +315,35 @@ const exporting = ref(false);
 const previewOpen = ref(false);
 /** 正在创建/打开会话 */
 const startingChat = ref(false);
+/** 开局选身份 */
+const identityOpen = ref(false);
+
+/**
+ * 开始对话：先问「你是谁、图什么」，再建会话。
+ *
+ * 不直接进旧会话：身份是这一场的核心设定，每次开新戏都该重新选。
+ */
+async function onIdentitySubmit(player: {
+  name: string;
+  role: string;
+  goal: string;
+}): Promise<void> {
+  const current = character.value;
+  if (!current || startingChat.value) return;
+
+  startingChat.value = true;
+  try {
+    const conversationId = await useChatStore().startWithPlayer(current.id, player);
+    if (conversationId) {
+      identityOpen.value = false;
+      await router.push(`/conversations/${conversationId}`);
+    } else {
+      error.value = useChatStore().error;
+    }
+  } finally {
+    startingChat.value = false;
+  }
+}
 /** 头像上传 */
 const avatarInputRef = ref<HTMLInputElement | null>(null);
 const uploadingAvatar = ref(false);
@@ -337,17 +375,7 @@ async function onAvatarPicked(event: Event): Promise<void> {
 
 /** 开始对话：有历史会话就进最近一个，没有就新建。 */
 async function startChat(): Promise<void> {
-  const current = character.value;
-  if (!current || startingChat.value) return;
-
-  startingChat.value = true;
-  try {
-    const conversationId = await useChatStore().startWith(current.id);
-    if (conversationId) await router.push(`/conversations/${conversationId}`);
-    else error.value = useChatStore().error;
-  } finally {
-    startingChat.value = false;
-  }
+  identityOpen.value = true;
 }
 const editing = ref(false);
 const error = ref<string | null>(null);

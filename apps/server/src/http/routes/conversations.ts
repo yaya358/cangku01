@@ -78,6 +78,8 @@ export function registerConversationRoutes(app: AppInstance): void {
     const conversation = app.conversations().create({
       characterId: body.characterId,
       title: body.title?.trim() || `${character.name}的对话`,
+      // 开局就带上身份：之后每一轮都按它组装上下文
+      ...(body.player ? { player: body.player } : {}),
     });
 
     // 开场白直接落成第一条消息：新会话打开就有内容，不用等用户先说
@@ -221,7 +223,9 @@ export function registerConversationRoutes(app: AppInstance): void {
       character,
       entries: app.worldbook().listForCharacter(character.id),
       messages: [...history, { role: 'user', content: body.content }],
-      userName: body.userName,
+      userName: body.userName ?? conversation.player.name,
+      // 这一轮你是谁来、图什么 —— 决定角色会戒备、讨好还是试探
+      player: conversation.player,
     });
 
     const controller = new AbortController();
@@ -339,6 +343,8 @@ export function registerConversationRoutes(app: AppInstance): void {
       character,
       entries: app.worldbook().listForCharacter(character.id),
       messages: [...historyBefore, { role: 'user', content: userInput }],
+      userName: conversation.player.name || undefined,
+      player: conversation.player,
     });
 
     const controller = new AbortController();

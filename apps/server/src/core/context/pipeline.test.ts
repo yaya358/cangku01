@@ -161,6 +161,59 @@ describe('上下文组装 · 顺序', () => {
   });
 });
 
+describe('上下文组装 · 玩家身份', () => {
+  it('没设定身份时不产生 user_persona 层', () => {
+    const context = assembleContext(makeInput());
+    expect(context.layers.some((layer) => layer.kind === 'user_persona')).toBe(false);
+  });
+
+  it('设定身份后单独成层，并要求角色别当陌生人寒暄', () => {
+    const context = assembleContext(
+      makeInput({
+        player: { name: '陈九', role: '来讨债的', goal: '让他承认十四年前那件事' },
+      }),
+    );
+
+    const layer = context.layers.find((item) => item.kind === 'user_persona');
+    expect(layer).toBeDefined();
+    expect(layer?.content).toContain('来讨债的');
+    expect(layer?.content).toContain('让他承认十四年前那件事');
+    expect(layer?.content).toContain('不要把他当成第一次见面的陌生人');
+  });
+
+  it('没传称呼时用身份里的名字（两者不一致时以显式传入为准）', () => {
+    const withPlayerName = assembleContext(
+      makeInput({ userName: undefined, player: { name: '陈九', role: '来讨债的' } }),
+    );
+    expect(withPlayerName.layers.find((l) => l.kind === 'user_persona')?.content).toContain('陈九');
+
+    const explicitWins = assembleContext(
+      makeInput({ userName: '旅人', player: { name: '陈九', role: '来讨债的' } }),
+    );
+    expect(explicitWins.layers.find((l) => l.kind === 'user_persona')?.content).toContain('旅人');
+  });
+
+  it('身份层比人设更靠后裁（丢了它角色只会对陌生人客套）', () => {
+    const context = assembleContext(makeInput({ player: { name: '陈九', role: '来讨债的' } }));
+
+    const player = context.layers.find((layer) => layer.kind === 'user_persona');
+    const persona = context.layers.find((layer) => layer.kind === 'persona');
+    expect(player?.priority ?? 0).toBeGreaterThan(persona?.priority ?? 0);
+  });
+
+  it('身份会进最终的 system 消息', () => {
+    const context = assembleContext(
+      makeInput({
+        userName: '陈九',
+        player: { name: '陈九', role: '来讨债的', goal: '让他承认十四年前那件事' },
+      }),
+    );
+
+    expect(context.messages[0]?.content).toContain('来讨债的');
+    expect(context.messages[0]?.content).toContain('让他承认十四年前那件事');
+  });
+});
+
 describe('上下文组装 · 秘密与目的', () => {
   it('没有秘密和目的时不产生 motive 层（老角色行为不变）', () => {
     const context = assembleContext(makeInput());
