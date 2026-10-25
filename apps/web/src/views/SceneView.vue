@@ -47,169 +47,236 @@
     </n-alert>
 
     <template v-else-if="scene">
-      <!-- 在场者：点一下看这个人现在能不能搭上话 -->
-      <div class="presence">
-        <span class="presence__label">在场</span>
-        <button
-          v-for="person in present"
-          :key="person.id"
-          class="person"
-          type="button"
-          :class="{ 'person--busy': person.reachability === 'busy' }"
-          :title="person.hint"
-          @click="toggleHint(person.id)"
-        >
-          <span class="person__avatar">
-            <img
-              v-if="!brokenAvatars[person.id]"
-              :src="avatarOf(person.id)"
-              :alt="person.name"
-              @error="markAvatarBroken(person.id)"
-            />
-            <span v-else class="person__initial">{{ person.name.slice(0, 1) }}</span>
-          </span>
-          <span class="person__text">
-            <span class="person__name">{{ person.name }}</span>
-            <span v-if="person.busyWith" class="person__busy">{{ person.busyWith }}</span>
-          </span>
-        </button>
-        <span v-if="present.length === 0" class="presence__empty">
-          这里现在没人 —— 换个地方，或者等有人进来
-        </span>
-      </div>
-
-      <p v-if="hintText" class="presence__hint">
-        <span>{{ hintText }}</span>
-        <button v-if="canPullAway" class="tool" type="button" :disabled="pulling" @click="pullAway">
-          到没人的地方说话
-        </button>
-        <!-- 换地方不是免费的：说清代价，比事后解释好 -->
-        <span v-if="canPullAway" class="presence__note">他会跟你走 —— 留下的人会看见</span>
-      </p>
-
-      <!-- 关系：他对你的态度会真的影响语气，所以摆在场上显眼的位置 -->
-      <div v-if="relations.length > 0" class="relations">
-        <span class="relations__label">关系</span>
-        <span
-          v-for="item in relations"
-          :key="item.id"
-          class="relation"
-          :title="`${item.reason || '还没打过交道'}（${affinityMarks.cold} 以下冷处理，${affinityMarks.open} 以上松口）`"
-        >
-          <span class="relation__name">{{ item.name }}</span>
-          <span class="relation__bar">
-            <span
-              class="relation__fill"
-              :class="`relation__fill--${item.mood}`"
-              :style="{ width: `${item.value}%` }"
-            />
-          </span>
-          <span class="relation__value">{{ item.value }}</span>
-          <span v-if="item.moodText" class="relation__mood">{{ item.moodText }}</span>
-        </span>
-      </div>
-
-      <!-- 上一轮为什么加分/减分：没有这一行，好感就只是个会动的数字 -->
-      <p v-if="affinityNote" class="relation__note">
-        {{ affinityNote.name }}
-        <template v-if="affinityNote.failed">{{ affinityNote.reason }}</template>
-        <template v-else>
-          好感 {{ affinityNote.delta >= 0 ? '+' : '' }}{{ affinityNote.delta }}
-          <span class="relation__why">· {{ affinityNote.reason }}</span>
-        </template>
-      </p>
-
-      <n-alert v-if="error" type="error" :title="error" closable @close="store.clearError()" />
-
-      <div ref="logRef" class="scene__log">
-        <p v-if="isEmpty" class="scene__empty">
-          这一场还没人开口。说一句，在场的人会接 —— 用 @名字 可以指定谁先说。
-        </p>
-
-        <article
-          v-for="bubble in messages"
-          :key="bubble.id"
-          class="bubble"
-          :class="[
-            `bubble--${bubble.role}`,
-            bubble.kind ? `bubble--${bubble.kind}` : '',
-            {
-              'bubble--optimistic': bubble.optimistic,
-              'bubble--notice': bubble.notice,
-              'bubble--whisper': bubble.whisper,
-              'bubble--eavesdrop': bubble.eavesdrop,
-            },
-          ]"
-        >
-          <!-- 场景日志：谁看见了你们离开、低声说话有没有被听见（不是谁说的话） -->
-          <p v-if="bubble.role === 'system' && !bubble.notice" class="bubble__log">
-            {{ bubble.content }}
-          </p>
-
-          <!-- 剧情事件：不是谁说的话，而是「这一轮发生了什么」 -->
-          <p v-else-if="bubble.notice" class="notice">
-            <span class="notice__head"
-              >第 {{ bubble.notice.turn }} 轮 · {{ bubble.notice.title }}</span
-            >
-            <span class="notice__body">{{ bubble.content }}</span>
-          </p>
-
-          <template v-else>
-            <p v-if="bubble.role === 'assistant' && bubble.speakerId" class="bubble__speaker">
-              {{ store.speakerName(bubble.speakerId) }}
-              <span v-if="bubble.eavesdrop" class="bubble__tag">他听见了</span>
-            </p>
-
-            <p v-if="bubble.whisper" class="bubble__tag bubble__tag--whisper">低声</p>
-
-            <p class="bubble__body">
-              {{ bubble.content
-              }}<span v-if="bubble.pending" class="bubble__caret" aria-hidden="true" />
-            </p>
-
-            <p v-if="bubble.meta && bubble.meta.totalTokens" class="bubble__meta">
-              {{ bubble.meta.totalTokens }} tokens
-              <template v-if="bubble.meta.durationMs">· {{ bubble.meta.durationMs }}ms</template>
+      <div class="scene__body">
+        <!-- 左：主线。你此刻要弄明白什么 -->
+        <aside class="side side--left">
+          <p class="side__head">主线</p>
+          <template v-if="journal?.quest">
+            <p class="quest__chapter">第 {{ journal.chapter }} 章</p>
+            <p class="quest__title">{{ journal.quest.title }}</p>
+            <p class="quest__goal">目标：{{ journal.quest.goal }}</p>
+            <p class="quest__progress">
+              情报 {{ journal.progress?.clues ?? 0 }}/{{ journal.progress?.needed ?? 0 }}
+              <span v-if="(journal.progress?.requiredAffinity ?? 0) > 0">
+                · 好感 {{ journal.progress?.affinity ?? 0 }}/{{
+                  journal.progress?.requiredAffinity
+                }}
+              </span>
             </p>
           </template>
-        </article>
-      </div>
+          <p v-else class="side__empty">这一条主线演完了 —— 世界还在，人可以继续聊。</p>
 
-      <div class="scene__input">
-        <!-- 输入方式：决定这句是说的、做的还是想的（prompt 与气泡样式都不同） -->
-        <div class="modes">
-          <button
-            v-for="item in INPUT_MODES"
-            :key="item.value"
-            class="mode"
-            type="button"
-            :class="{ 'mode--on': mode === item.value }"
-            :disabled="streaming"
-            @click="mode = item.value"
+          <details v-if="pastQuests.length > 0" class="quest__history">
+            <summary>之前的章节（{{ pastQuests.length }}）</summary>
+            <p v-for="item in pastQuests" :key="item.id">{{ item.title }}</p>
+          </details>
+        </aside>
+
+        <!-- 中：现场 -->
+        <div class="scene__main">
+          <!-- 在场者：点一下看这个人现在能不能搭上话 -->
+          <div class="presence">
+            <span class="presence__label">在场</span>
+            <button
+              v-for="person in present"
+              :key="person.id"
+              class="person"
+              type="button"
+              :class="{ 'person--busy': person.reachability === 'busy' }"
+              :title="person.hint"
+              @click="toggleHint(person.id)"
+            >
+              <span class="person__avatar">
+                <img
+                  v-if="!brokenAvatars[person.id]"
+                  :src="avatarOf(person.id)"
+                  :alt="person.name"
+                  @error="markAvatarBroken(person.id)"
+                />
+                <span v-else class="person__initial">{{ person.name.slice(0, 1) }}</span>
+              </span>
+              <span class="person__text">
+                <span class="person__name">{{ person.name }}</span>
+                <span v-if="person.busyWith" class="person__busy">{{ person.busyWith }}</span>
+              </span>
+            </button>
+            <span v-if="present.length === 0" class="presence__empty">
+              这里现在没人 —— 换个地方，或者等有人进来
+            </span>
+          </div>
+
+          <p v-if="hintText" class="presence__hint">
+            <span>{{ hintText }}</span>
+            <button
+              v-if="canPullAway"
+              class="tool"
+              type="button"
+              :disabled="pulling"
+              @click="pullAway"
+            >
+              到没人的地方说话
+            </button>
+            <!-- 换地方不是免费的：说清代价，比事后解释好 -->
+            <span v-if="canPullAway" class="presence__note">他会跟你走 —— 留下的人会看见</span>
+          </p>
+
+          <!-- 上一轮为什么加分/减分：没有这一行，好感就只是个会动的数字 -->
+          <p v-if="affinityNote" class="relation__note">
+            {{ affinityNote.name }}
+            <template v-if="affinityNote.failed">{{ affinityNote.reason }}</template>
+            <template v-else>
+              好感 {{ affinityNote.delta >= 0 ? '+' : '' }}{{ affinityNote.delta }}
+              <span class="relation__why">· {{ affinityNote.reason }}</span>
+            </template>
+          </p>
+
+          <n-alert v-if="error" type="error" :title="error" closable @close="store.clearError()" />
+
+          <div ref="logRef" class="scene__log">
+            <p v-if="isEmpty" class="scene__empty">
+              这一场还没人开口。说一句，在场的人会接 —— 用 @名字 可以指定谁先说。
+            </p>
+
+            <article
+              v-for="bubble in messages"
+              :key="bubble.id"
+              class="bubble"
+              :class="[
+                `bubble--${bubble.role}`,
+                bubble.kind ? `bubble--${bubble.kind}` : '',
+                {
+                  'bubble--optimistic': bubble.optimistic,
+                  'bubble--notice': bubble.notice,
+                  'bubble--whisper': bubble.whisper,
+                  'bubble--eavesdrop': bubble.eavesdrop,
+                },
+              ]"
+            >
+              <!-- 场景日志：谁看见了你们离开、低声说话有没有被听见（不是谁说的话） -->
+              <p v-if="bubble.role === 'system' && !bubble.notice" class="bubble__log">
+                {{ bubble.content }}
+              </p>
+
+              <!-- 剧情事件：不是谁说的话，而是「这一轮发生了什么」 -->
+              <p v-else-if="bubble.notice" class="notice">
+                <span class="notice__head"
+                  >第 {{ bubble.notice.turn }} 轮 · {{ bubble.notice.title }}</span
+                >
+                <span class="notice__body">{{ bubble.content }}</span>
+              </p>
+
+              <template v-else>
+                <p v-if="bubble.role === 'assistant' && bubble.speakerId" class="bubble__speaker">
+                  {{ store.speakerName(bubble.speakerId) }}
+                  <span v-if="bubble.eavesdrop" class="bubble__tag">他听见了</span>
+                </p>
+
+                <p v-if="bubble.whisper" class="bubble__tag bubble__tag--whisper">低声</p>
+
+                <p class="bubble__body">
+                  {{ bubble.content
+                  }}<span v-if="bubble.pending" class="bubble__caret" aria-hidden="true" />
+                </p>
+
+                <p v-if="bubble.meta && bubble.meta.totalTokens" class="bubble__meta">
+                  {{ bubble.meta.totalTokens }} tokens
+                  <template v-if="bubble.meta.durationMs"
+                    >· {{ bubble.meta.durationMs }}ms</template
+                  >
+                </p>
+              </template>
+            </article>
+          </div>
+
+          <div class="scene__input">
+            <!-- 输入方式：决定这句是说的、做的还是想的（prompt 与气泡样式都不同） -->
+            <div class="modes">
+              <button
+                v-for="item in INPUT_MODES"
+                :key="item.value"
+                class="mode"
+                type="button"
+                :class="{ 'mode--on': mode === item.value }"
+                :disabled="streaming"
+                @click="mode = item.value"
+              >
+                {{ item.label }}
+              </button>
+              <span class="modes__hint">{{ currentMode.hint }}</span>
+            </div>
+
+            <n-input
+              v-model:value="draft"
+              type="textarea"
+              :placeholder="currentMode.placeholder"
+              :autosize="{ minRows: 2, maxRows: 4 }"
+              :disabled="streaming || loading"
+              @keydown="onKeydown"
+            />
+
+            <div class="scene__row">
+              <n-button v-if="!streaming" type="primary" :disabled="!canSend" @click="submit">
+                说
+              </n-button>
+              <n-button v-else type="error" ghost @click="store.stop()">停</n-button>
+              <span class="scene__hint">
+                @名字 指定谁先说；不指定的话在场的人轮流接。每轮都会落库。
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右：情报本 + 好感 -->
+        <aside class="side side--right">
+          <p class="side__head">
+            情报本 <span class="side__count">{{ clues.length }}</span>
+          </p>
+
+          <p v-if="clues.length === 0" class="side__empty">
+            还没有情报。有人愿意跟你说真话时，这里会多一条。
+          </p>
+
+          <ul v-else class="clues">
+            <li v-for="(clue, index) in clues" :key="clue.id" class="clue">
+              <button
+                class="clue__head"
+                type="button"
+                :title="clue.quote ? '点开看当时的原话' : '没有记下原话'"
+                @click="toggleClue(clue.id)"
+              >
+                <span class="clue__index">{{ index + 1 }}</span>
+                <span class="clue__text">{{ clue.content }}</span>
+              </button>
+              <p class="clue__meta">
+                {{ clue.source || '你自己' }}
+                <template v-if="clue.sourceTurn">· 第 {{ clue.sourceTurn }} 轮</template>
+              </p>
+              <p v-if="expandedClue === clue.id && clue.quote" class="clue__quote">
+                「{{ clue.quote }}」
+              </p>
+            </li>
+          </ul>
+
+          <p class="side__head side__head--gap">好感</p>
+          <p v-if="relations.length === 0" class="side__empty">还没打过交道。</p>
+          <div
+            v-for="item in relations"
+            :key="item.id"
+            class="relation relation--row"
+            :title="`${item.reason || '还没打过交道'}（${affinityMarks.cold} 以下冷处理，${affinityMarks.open} 以上松口）`"
           >
-            {{ item.label }}
-          </button>
-          <span class="modes__hint">{{ currentMode.hint }}</span>
-        </div>
-
-        <n-input
-          v-model:value="draft"
-          type="textarea"
-          :placeholder="currentMode.placeholder"
-          :autosize="{ minRows: 2, maxRows: 6 }"
-          :disabled="streaming || loading"
-          @keydown="onKeydown"
-        />
-
-        <div class="scene__row">
-          <n-button v-if="!streaming" type="primary" :disabled="!canSend" @click="submit">
-            说
-          </n-button>
-          <n-button v-else type="error" ghost @click="store.stop()">停</n-button>
-          <span class="scene__hint">
-            @名字 指定谁先说；不指定的话在场的人轮流接。每轮都会落库。
-          </span>
-        </div>
+            <span class="relation__name">{{ item.name }}</span>
+            <span class="relation__bar">
+              <span
+                class="relation__fill"
+                :class="`relation__fill--${item.mood}`"
+                :style="{ width: `${item.value}%` }"
+              />
+            </span>
+            <span class="relation__value">{{ item.value }}</span>
+            <span v-if="item.moodText" class="relation__mood">{{ item.moodText }}</span>
+          </div>
+        </aside>
       </div>
     </template>
   </section>
@@ -237,7 +304,7 @@ const router = useRouter();
 const store = useSceneStore();
 const { scene, present, messages, loading, streaming, error, turn, isEmpty, isPrivate } =
   storeToRefs(store);
-const { sourceSceneName, affinityNote } = storeToRefs(store);
+const { sourceSceneName, affinityNote, journal } = storeToRefs(store);
 
 /** 关系条：只显示此刻在场的人，数值来自 store 里的好感表。 */
 const relations = computed(() =>
@@ -315,6 +382,19 @@ const brokenAvatars = ref<Record<string, boolean>>({});
 /** 正在带人换地方 / 正在回去 */
 const pulling = ref(false);
 const leaving = ref(false);
+/** 情报本里展开的那一条 */
+const expandedClue = ref<string | null>(null);
+
+/** 情报本：从新到旧还是从旧到新？按拿到的时间正序，读起来像一条线索链 */
+const clues = computed(() => store.journal?.clues ?? []);
+/** 已完成的章节（左下角折叠着看） */
+const pastQuests = computed(
+  () => store.journal?.quests.filter((quest) => quest.status === 'done') ?? [],
+);
+
+function toggleClue(clueId: string): void {
+  expandedClue.value = expandedClue.value === clueId ? null : clueId;
+}
 
 function avatarOf(characterId: string): string {
   return characterAvatarEndpoint(characterId);
@@ -486,6 +566,165 @@ onBeforeUnmount(() => {
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.8;
+}
+
+/* 三栏：主线 | 现场 | 情报本 + 好感 */
+.scene__body {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: 190px minmax(0, 1fr) 232px;
+  gap: 12px;
+}
+
+.scene__main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.side {
+  display: flex;
+  overflow-y: auto;
+  padding: 12px;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+.side__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+
+.side__head--gap {
+  margin-top: 8px;
+}
+
+.side__count {
+  color: var(--text-faint);
+}
+
+.side__empty {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.75;
+}
+
+/* 主线那一栏 */
+.quest__chapter {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.quest__title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.quest__goal {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.75;
+}
+
+/* 进度用等宽字体：数字要对齐，玩家才觉得自己在推一条线 */
+.quest__progress {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.quest__history {
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.quest__history summary {
+  cursor: pointer;
+}
+
+/* 情报本 */
+.clues {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+}
+
+.clue {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.clue__head {
+  display: flex;
+  width: 100%;
+  padding: 0;
+  align-items: baseline;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.65;
+  text-align: left;
+  cursor: pointer;
+}
+
+.clue__head:hover {
+  color: var(--accent);
+}
+
+.clue__index {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.clue__text {
+  flex: 1;
+}
+
+.clue__meta {
+  padding-left: 16px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+/* 原话：不确定真假的时候，玩家想看的其实是「他当时怎么说的」 */
+.clue__quote {
+  margin-top: 2px;
+  padding: 6px 9px;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 6px 6px 0;
+  background: var(--bg-elevated);
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.relation--row {
+  padding: 2px 0;
+  cursor: default;
 }
 
 /* 在场者头像条 */
@@ -812,24 +1051,6 @@ onBeforeUnmount(() => {
 }
 
 /* 关系条：一眼看出「他松了口」还是「他在冷处理」 */
-.relations {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 14px;
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-soft);
-}
-
-.relations__label {
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-}
-
 .relation {
   display: flex;
   align-items: center;
@@ -950,13 +1171,28 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-@media (max-width: 640px) {
+/* 窄屏：侧栏跑到上下，别把对话挤成一条缝 */
+@media (max-width: 1000px) {
   .scene {
     height: auto;
   }
 
+  .scene__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .side {
+    max-height: 220px;
+  }
+
   .scene__log {
     min-height: 320px;
+  }
+}
+
+@media (max-width: 640px) {
+  .scene__log {
+    min-height: 260px;
   }
 }
 </style>

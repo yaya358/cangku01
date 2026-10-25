@@ -2,6 +2,7 @@ import type {
   Affinity,
   ChatStreamPayload,
   CreateSaveInput,
+  Journal,
   MessageKind,
   PrivateSceneResult,
   Save,
@@ -11,6 +12,7 @@ import type {
 import {
   WORLD_SAVES_ENDPOINT,
   worldSaveAffinityEndpoint,
+  worldSaveJournalEndpoint,
   worldSaveScenesEndpoint,
   worldSceneEndpoint,
   worldScenePrivateEndpoint,
@@ -53,6 +55,11 @@ export function fetchScene(id: string): Promise<SceneDetail> {
 /** 这个存档里所有人对你的好感（界面上的好感条）。 */
 export function fetchAffinity(saveId: string): Promise<Affinity[]> {
   return apiGet<Affinity[]>(worldSaveAffinityEndpoint(saveId), { timeoutMs: 10_000 });
+}
+
+/** 侧栏要用的一整份资料：主线进度 + 情报本 + 好感。 */
+export function fetchJournal(saveId: string): Promise<Journal> {
+  return apiGet<Journal>(worldSaveJournalEndpoint(saveId), { timeoutMs: 10_000 });
 }
 
 export interface SendSceneHandlers {

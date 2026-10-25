@@ -24,6 +24,8 @@ import { seedSampleCharacters } from './core/samples/index.js';
 import { createScriptEventRepository } from './core/script/repository.js';
 import { createAffinityRepository } from './core/world/affinity.js';
 import type { AffinityRepository } from './core/world/affinity.js';
+import { createJournalRepository } from './core/world/journal.js';
+import type { JournalRepository } from './core/world/journal.js';
 import { createWorldRepository } from './core/world/repository.js';
 import type { WorldRepository } from './core/world/repository.js';
 import type { ScriptEventRepository } from './core/script/repository.js';
@@ -192,6 +194,13 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
       return characterRepo.getById(characterId)?.name;
     });
     return affinityRepo;
+  });
+
+  let journalRepo: JournalRepository | null = null;
+  app.decorate('journal', (): JournalRepository => {
+    if (!storage.isOpen) throw AppError.internal('数据库尚未就绪，请稍后重试');
+    journalRepo ??= createJournalRepository(storage.db);
+    return journalRepo;
   });
 
   let scriptRepo: ScriptEventRepository | null = null;

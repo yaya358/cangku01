@@ -155,6 +155,27 @@ export type ChatStreamPayload =
       mood: 'open' | 'neutral' | 'cold';
       failed?: boolean;
     }
+  | {
+      /** 你拿到了一条新情报（侧栏的情报本要立刻多一条） */
+      type: 'clue';
+      clueId: string;
+      content: string;
+      /** 谁说的；你自己看出来的为空 */
+      source: string | null;
+      sourceTurn: number | null;
+      /** 原话（展开看） */
+      quote: string | null;
+    }
+  | {
+      /** 这一章过去了，进入下一章（或者全部演完） */
+      type: 'quest';
+      chapter: number;
+      /** 新一章的标题；演完则为 null */
+      title: string | null;
+      goal: string | null;
+      /** 全部章节是否已经演完 */
+      finished: boolean;
+    }
   | { type: 'error'; code: string; message: string; retryable: boolean };
 
 /** 非流式接口的返回体。 */

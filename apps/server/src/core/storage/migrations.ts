@@ -371,6 +371,51 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 14,
+    name: 'quests-and-clues',
+    up: (db) => {
+      /**
+       * 主线（quests）与情报本（clues）。
+       *
+       * 为什么不用 beats 那套通用条件：设计文档里已经定过 ——
+       * 章节需求就是「几条情报 + 某人好感多少」，两个整数比一门小语言好校验、
+       * 也好在侧栏上说清楚。真需要复杂条件时再加 beats 也不迟。
+       *
+       *   quests.required_clues     —— 关掉这一章要几条情报
+       *   quests.required_affinity  —— 还要有人的好感达到多少（0 = 不看好感）
+       *   clues.quote               —— 原话：情报本要能「展开看当时是怎么说的」
+       */
+      db.exec(`
+        CREATE TABLE quests (
+          id                TEXT PRIMARY KEY,
+          save_id           TEXT NOT NULL REFERENCES saves (id) ON DELETE CASCADE,
+          chapter           INTEGER NOT NULL,
+          title             TEXT NOT NULL,
+          goal              TEXT NOT NULL DEFAULT '',
+          status            TEXT NOT NULL DEFAULT 'active',
+          required_clues    INTEGER NOT NULL DEFAULT 1,
+          required_affinity INTEGER NOT NULL DEFAULT 0,
+          created_at        TEXT NOT NULL,
+          updated_at        TEXT NOT NULL
+        )
+      `);
+      db.exec('CREATE INDEX idx_quests_save ON quests (save_id, chapter)');
+
+      db.exec(`
+        CREATE TABLE clues (
+          id         TEXT PRIMARY KEY,
+          save_id    TEXT NOT NULL REFERENCES saves (id) ON DELETE CASCADE,
+          content    TEXT NOT NULL,
+          source     TEXT,
+          source_turn INTEGER,
+          quote      TEXT,
+          known_at   TEXT NOT NULL
+        )
+      `);
+      db.exec('CREATE INDEX idx_clues_save ON clues (save_id, known_at)');
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

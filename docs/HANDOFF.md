@@ -8,7 +8,7 @@
 本地 AI 角色扮演酒馆：Vue3 前端 + Fastify/SQLite 后端，pnpm monorepo。
 仓库 `C:\Users\jingy\Desktop\vork01`，远端 `github.com/yaya358/cangku01`（main）。
 
-**当前状态**：56 个提交 / 344 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
+**当前状态**：57 个提交 / 357 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
 
 ```bash
 pnpm install && pnpm dev     # 后端 8787 + 前端 5173
@@ -33,8 +33,8 @@ pnpm -r run typecheck && pnpm lint
 | 2 | 前端场景视图 | ✅ 已完成（`views/SceneView.vue` + `GET /api/world/scenes/:id`） |
 | 3 | 私聊场景 + 低声 + 偷听 | ✅ 已完成（`core/world/eavesdrop.ts`、`whisper.ts`、场景私聊接口） |
 | 4 | 好感度打分 + 阈值解锁 | ✅ 已完成（`core/world/affinity.ts`、`scoring.ts`、关系条） |
-| 5 | 主线章节 + 情报本侧栏 | ⬜ **接下来做这个** |
-| 6 | 旧会话迁移成私密场景 | ⬜ |
+| 5 | 主线章节 + 情报本侧栏 | ✅ 已完成（`core/world/journal.ts`、三栏布局、情报本） |
+| 6 | 旧会话迁移成私密场景 | ⬜ **接下来做这个** |
 
 ### 第 2 步：前端场景视图（已完成，要点留着备查）
 
@@ -89,10 +89,20 @@ pnpm -r run typecheck && pnpm lint
 - 交互细节：SSE 的 `done` 一到就解锁输入，不等后面的打分/偷听反应（那两次调用还要 1.5s 左右，
   否则「停」按钮一直亮着，像卡住）。
 
-### 第 5 步：主线 + 情报本
+### 第 5 步：主线 + 情报本（已完成，要点留着备查）
 
-- `quests`（章节/目标/状态）、`clues`（内容/来源/轮次）
-- 侧栏三块：主线进度、情报本（可展开看原话）、好感条
+- 表 `quests` / `clues`。**没有做 beats 那套通用条件表**：设计文档自己写了
+  「结构化字段比一门小语言划算」，所以章节需求就是两个整数（`required_clues`、
+  `required_affinity`），advance 里一眼能看懂，侧栏也能直接显示成「情报 1/2 · 好感 61/60」。
+- 示例主线三章写在 `journal.ts` 的 `MAINLINE` 里，`ensureMainline` 懒补：
+  老存档（第 5 步之前建的）第一次读侧栏/推进时会自动补上第一章，不留空侧栏。
+- 情报从哪来：**好感跨过 60 那一下** —— 取他 secret 的第一句（没有 secret 就取 goal），
+  连同这一轮的原话（quote）、第几轮、谁说的，一起进情报本。同样的内容不重复记。
+  这正是第 4 步「松口」的落点：没有它，好感与情报本各转各的。
+- 接口：`GET /api/world/saves/:id/journal` 一次给全（章号 / 当前章 / 章节列表 / 情报 / 进度）；
+  SSE 新增 `clue` 与 `quest` 两帧，界面当场加条、当场换章。
+- 界面：三栏（190px 主线 | 现场 | 232px 情报本 + 好感）。情报可点开看原话；
+  好感条带 20/60 刻度。窄屏（<1000px）侧栏落到上下。
 
 ### 第 6 步：迁移
 

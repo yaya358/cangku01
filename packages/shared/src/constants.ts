@@ -118,6 +118,11 @@ export function worldSaveAffinityEndpoint(saveId: string): string {
   return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}/affinity`;
 }
 
+/** 某存档的侧栏资料：主线章节 + 情报本 + 好感。 */
+export function worldSaveJournalEndpoint(saveId: string): string {
+  return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}/journal`;
+}
+
 /** 场景集合（详情、进场都要用）。 */
 export const WORLD_SCENES_ENDPOINT = `${API_PREFIX}/world/scenes`;
 

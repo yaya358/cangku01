@@ -11,6 +11,7 @@ import type { SqliteStorage } from '../core/storage/index.js';
 import type { WorldbookRepository } from '../core/worldbook/repository.js';
 import type { WorldRepository } from '../core/world/repository.js';
 import type { AffinityRepository } from '../core/world/affinity.js';
+import type { JournalRepository } from '../core/world/journal.js';
 import type { AppLogger } from '../lib/logger.js';
 
 /**
@@ -62,6 +63,8 @@ declare module 'fastify' {
     world: () => WorldRepository;
     /** 好感度仓储（存档 × 角色） */
     affinity: () => AffinityRepository;
+    /** 主线与情报本仓储 */
+    journal: () => JournalRepository;
     /** 剧本事件仓储（含会话触发记录） */
     scriptEvents: () => ScriptEventRepository;
   }

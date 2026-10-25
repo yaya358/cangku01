@@ -1,6 +1,8 @@
 import type {
   Affinity,
   ChatStreamPayload,
+  Clue,
+  Journal,
   Message,
   MessageKind,
   Scene,
@@ -14,6 +16,7 @@ import { computed, ref } from 'vue';
 import {
   createPrivateScene,
   fetchAffinity,
+  fetchJournal,
   fetchScene,
   listScenes,
   returnToSourceScene,
@@ -90,6 +93,8 @@ export const useSceneStore = defineStore('scene', () => {
     reason: string;
     failed: boolean;
   } | null>(null);
+  /** 侧栏：主线 + 情报本 */
+  const journal = ref<Journal | null>(null);
   const loading = ref(false);
   const streaming = ref(false);
   const error = ref<string | null>(null);
@@ -180,6 +185,60 @@ export const useSceneStore = defineStore('scene', () => {
       reason: event.reason,
       failed: event.failed ?? false,
     };
+
+    // 侧栏的「好感 x/y」跟着动，不用再拉一次接口
+    if (journal.value?.progress) {
+      journal.value = {
+        ...journal.value,
+        progress: {
+          ...journal.value.progress,
+          affinity: Math.max(journal.value.progress.affinity, event.value),
+        },
+      };
+    }
+  }
+
+  /** 侧栏：主线进度与情报本。 */
+  async function loadJournal(): Promise<void> {
+    const current = scene.value;
+    if (!current) return;
+    try {
+      journal.value = await fetchJournal(current.saveId);
+    } catch {
+      // 侧栏读不到不影响说话；界面上就是空着
+    }
+  }
+
+  /** 拿到一条新情报：情报本当场多一条，进度跟着加一。 */
+  function applyClue(event: Extract<ChatStreamPayload, { type: 'clue' }>): void {
+    const current = scene.value;
+    const clue: Clue = {
+      id: event.clueId,
+      saveId: current?.saveId ?? '',
+      content: event.content,
+      source: event.source,
+      sourceTurn: event.sourceTurn,
+      quote: event.quote,
+      knownAt: new Date().toISOString(),
+    };
+
+    if (!journal.value) {
+      void loadJournal();
+      return;
+    }
+
+    journal.value = {
+      ...journal.value,
+      clues: [...journal.value.clues, clue],
+      progress: journal.value.progress
+        ? { ...journal.value.progress, clues: journal.value.progress.clues + 1 }
+        : null,
+    };
+  }
+
+  /** 这一章过去了：章节、章节列表、进度都变了，重新拉一次最省事。 */
+  function applyQuest(): void {
+    void loadJournal();
   }
 
   async function open(id: string): Promise<void> {
@@ -191,6 +250,7 @@ export const useSceneStore = defineStore('scene', () => {
       messages.value = detail.messages.map(toBubble);
       await loadSourceName();
       await loadAffinity();
+      await loadJournal();
     } catch (cause) {
       error.value = describeError(cause);
       scene.value = null;
@@ -328,6 +388,12 @@ export const useSceneStore = defineStore('scene', () => {
             case 'affinity':
               applyAffinity(event);
               break;
+            case 'clue':
+              applyClue(event);
+              break;
+            case 'quest':
+              applyQuest();
+              break;
             case 'notice':
               // 剧情事件：插在助手气泡之前，读起来就是「提示 → 有人应对」
               messages.value.splice(messages.value.length - 1, 0, {
@@ -420,6 +486,7 @@ export const useSceneStore = defineStore('scene', () => {
     sourceSceneName,
     affinity,
     affinityNote,
+    journal,
     loading,
     streaming,
     error,

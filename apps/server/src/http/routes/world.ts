@@ -19,6 +19,7 @@ import {
 } from '../../core/world/eavesdrop.js';
 import type { EavesdropListener } from '../../core/world/eavesdrop.js';
 import { describeReachability } from '../../core/world/repository.js';
+import { firstSentence } from '../../core/world/journal.js';
 import { buildScoringPrompt, parseScore, SCORE_FAILED_REASON } from '../../core/world/scoring.js';
 import { contentForSpeaker, whisperAudience } from '../../core/world/whisper.js';
 import type { AppInstance } from '../../types/fastify.js';
@@ -155,6 +156,32 @@ export function registerWorldRoutes(app: AppInstance): void {
     const { id } = request.params as { id: string };
     if (!app.world().getSave(id)) throw AppError.notFound(`存档不存在: ${id}`);
     return success(request.id, app.affinity().list(id));
+  });
+
+  /**
+   * 侧栏：主线进度 + 情报本 + 好感，一次给全。
+   *
+   * 顺手补一次「第一章」：已经有存档是在没有主线的时候建的，
+   * 别给玩家留一个空侧栏。
+   */
+  app.get(`${WORLD_SAVES_ENDPOINT}/:id/journal`, async (request) => {
+    const { id } = request.params as { id: string };
+    if (!app.world().getSave(id)) throw AppError.notFound(`存档不存在: ${id}`);
+
+    const journal = app.journal();
+    journal.ensureMainline(id);
+
+    const affinity = app.affinity().list(id);
+    const maxAffinity = affinity.reduce((max, item) => Math.max(max, item.value), 0);
+
+    return success(request.id, {
+      saveId: id,
+      chapter: journal.chapterOf(id),
+      quest: journal.activeQuest(id) ?? null,
+      quests: journal.listQuests(id),
+      clues: journal.listClues(id),
+      progress: journal.progress(id, maxAffinity),
+    });
   });
 
   /**
@@ -376,6 +403,8 @@ export function registerWorldRoutes(app: AppInstance): void {
       });
 
     const all = app.messages().listByConversation(conversation.id);
+    /** 这一轮是第几轮：用户消息数 + 1（情报本要记「第几轮听到的」） */
+    const turnNumber = all.filter((message) => message.role === 'user').length + 1;
     const spokenTurns = all.filter(
       (message) => message.role === 'assistant' && !message.eavesdrop,
     ).length;
@@ -546,6 +575,35 @@ export function registerWorldRoutes(app: AppInstance): void {
           reason: score.reason,
           mood: affinityMood(applied.affinity.value),
         });
+
+        /**
+         * 「松口」不是一句提示，而是**给东西**：他藏着的那件事，现在进了你的情报本。
+         *
+         * 这也是好感度与情报本之间唯一的连接点 —— 没有它，两条数值各转各的，
+         * 玩家感受不到「关系变好换来了什么」。
+         */
+        if (applied.crossed.includes('affinity:open')) {
+          const intel = firstSentence(speaker.secret ?? '') || firstSentence(speaker.goal ?? '');
+          if (intel.length > 0) {
+            const clue = app.journal().addClue({
+              saveId: scene.saveId,
+              content: intel,
+              source: speaker.name,
+              sourceTurn: turnNumber,
+              quote: result.text.slice(0, 200),
+            });
+            if (clue) {
+              writeEvent(raw, {
+                type: 'clue',
+                clueId: clue.id,
+                content: clue.content,
+                source: clue.source,
+                sourceTurn: clue.sourceTurn,
+                quote: clue.quote,
+              });
+            }
+          }
+        }
       } else {
         writeEvent(raw, {
           type: 'affinity',
@@ -558,6 +616,29 @@ export function registerWorldRoutes(app: AppInstance): void {
           failed: true,
         });
       }
+    }
+
+    /**
+     * 主线推进：情报够了、也有人愿意说真话，这一章就算过去了。
+     *
+     * 每轮都查一次而不是只在「拿到情报」时查：好感与情报是两个条件，
+     * 可能这一轮才凑齐，漏查一次玩家就得多说一句废话。
+     */
+    const maxAffinity = app
+      .affinity()
+      .list(scene.saveId)
+      .reduce((max, item) => Math.max(max, item.value), 0);
+    // 先把第一章补上：没打开过侧栏的存档也得能推进
+    app.journal().ensureMainline(scene.saveId);
+    const advancedChapter = app.journal().advance(scene.saveId, maxAffinity);
+    if (advancedChapter.advanced) {
+      writeEvent(raw, {
+        type: 'quest',
+        chapter: advancedChapter.chapter,
+        title: advancedChapter.next?.title ?? null,
+        goal: advancedChapter.next?.goal ?? null,
+        finished: advancedChapter.next === null,
+      });
     }
 
     /**

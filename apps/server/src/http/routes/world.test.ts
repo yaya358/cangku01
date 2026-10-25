@@ -765,3 +765,74 @@ describe('好感度', () => {
     );
   });
 });
+
+describe('主线与情报本', () => {
+  it('第一次打开就有第一章，情报本是空的', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId } = await seedSave(app, '月灯镇', [boss]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/world/saves/${saveId}/journal`,
+      });
+      expect(response.statusCode).toBe(200);
+      const journal = response.json().data;
+
+      expect(journal.chapter).toBe(1);
+      expect(journal.quest).toMatchObject({ chapter: 1, status: 'active' });
+      expect(journal.quest.title).toContain('第一章');
+      expect(journal.clues).toEqual([]);
+      expect(journal.progress).toMatchObject({ clues: 0, affinity: 0 });
+    });
+  });
+
+  it('松口就进情报本：来源、轮次、原话都在，并推进到第二章', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板', {
+        secret: '名单上最后一个人是他自己。他巡夜，是因为不敢睡。',
+      });
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      // 先把好感摆到 58：这一轮 +3 就跨过 60（松口）
+      app.affinity().apply(saveId, boss, 8, '（用例安排）');
+
+      const frames = await speak(app, sceneId, '我替你把这件事瞒下来。');
+      const clue = findEvent(frames, 'clue');
+      expect(clue).toMatchObject({ source: '月灯老板' });
+      expect(String(clue?.content)).toContain('名单上最后一个人是他自己');
+      expect(clue?.quote).toBeTruthy();
+
+      // 第一章只需要一条情报：这一轮就过关，进第二章
+      const quest = findEvent(frames, 'quest');
+      expect(quest).toMatchObject({ chapter: 2, finished: false });
+      expect(String(quest?.title)).toContain('第二章');
+
+      const journal = (
+        await app.inject({ method: 'GET', url: `/api/world/saves/${saveId}/journal` })
+      ).json().data;
+      expect(journal.chapter).toBe(2);
+      expect(journal.clues).toHaveLength(1);
+      expect(journal.clues[0]).toMatchObject({ source: '月灯老板', sourceTurn: 1 });
+      expect(journal.quests).toHaveLength(2);
+      expect(journal.quests[0]).toMatchObject({ chapter: 1, status: 'done' });
+      expect(journal.progress).toMatchObject({ clues: 1, needed: 2, requiredAffinity: 60 });
+    });
+  });
+
+  it('没有秘密的人松口也留不下情报，但不会报错', async () => {
+    await withApp(async ({ app }) => {
+      const stranger = await seedCharacter(app, '过路人', { goal: '想找个人问路。' });
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [stranger]);
+      app.affinity().apply(saveId, stranger, 8, '（用例安排）');
+
+      const frames = await speak(app, sceneId, '你要去哪儿？我带你走一段。');
+      expect(findEvent(frames, 'affinity')).toMatchObject({ value: 61, mood: 'open' });
+
+      // 没有秘密就从「目的」里取一句：情报本不该因为角色没填 secret 就空着
+      const clue = findEvent(frames, 'clue');
+      expect(clue).toBeTruthy();
+      expect(String(clue?.content)).toContain('问路');
+    });
+  });
+});
