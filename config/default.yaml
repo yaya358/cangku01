@@ -24,6 +24,9 @@ server:
   # 前端构建产物目录。null = 自动在仓库根找 apps/web/dist，
   # 找到后由后端直接托管（pnpm build 之后只开 8787 也能看整站）。
   staticDir: null
+  # 首次启动（角色表为空）时自动写入 8 个内置示例角色，头像一起写入。
+  # 别人 clone 下来起服务就能直接开聊；想从空库开始就改成 false。
+  seedSamples: true
 
 logging:
   # fatal | error | warn | info | debug | trace | silent

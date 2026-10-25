@@ -20,6 +20,7 @@ import type { MessageRepository } from './core/chat/message-repository.js';
 import { ExtensionRegistry } from './core/extension/index.js';
 import type { Extension } from './core/extension/index.js';
 import { createProvidersFromConfig } from './core/provider/index.js';
+import { seedSampleCharacters } from './core/samples/index.js';
 import { createSqliteStorage, resolveStoragePath } from './core/storage/index.js';
 import { createWorldbookRepository } from './core/worldbook/repository.js';
 import type { WorldbookRepository } from './core/worldbook/repository.js';
@@ -226,6 +227,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
 
   app.addHook('onReady', async () => {
     await extensions.setupAll();
+    await seedSamplesIfEmpty(app);
   });
 
   app.addHook('onClose', async () => {
@@ -237,4 +239,26 @@ export async function buildApp(options: BuildAppOptions): Promise<AppInstance> {
     'Fastify 实例构建完成',
   );
   return app;
+}
+
+/**
+ * 空库时写入内置示例角色。
+ *
+ * 只在「角色表为空」时动手：这是给第一次跑起来的人准备的，
+ * 老库不会被动，关掉开关（server.seedSamples: false）也不动手。
+ */
+async function seedSamplesIfEmpty(app: AppInstance): Promise<void> {
+  if (!app.config.server.seedSamples) return;
+  if (app.characters().count() > 0) return;
+
+  try {
+    const result = seedSampleCharacters(app);
+    app.log.info(
+      { created: result.created.length, adopted: result.adopted.length },
+      '已写入内置示例角色',
+    );
+  } catch (error) {
+    // 播种失败不该挡住启动：用户仍然可以自己导入角色
+    app.log.warn({ err: error }, '内置示例角色写入失败');
+  }
 }

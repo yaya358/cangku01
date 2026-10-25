@@ -19,6 +19,12 @@ export const HEALTH_ENDPOINT = `${API_PREFIX}/health`;
 /** provider 列表接口路径。 */
 export const PROVIDERS_ENDPOINT = `${API_PREFIX}/providers`;
 
+/** 管理接口前缀（本机/可信内网使用，无鉴权）。 */
+export const ADMIN_PREFIX = `${API_PREFIX}/admin`;
+
+/** 重新播种内置示例角色（幂等）。 */
+export const ADMIN_SEED_ENDPOINT = `${ADMIN_PREFIX}/seed`;
+
 /** 非流式对话接口路径。 */
 export const CHAT_ENDPOINT = `${API_PREFIX}/chat`;
 

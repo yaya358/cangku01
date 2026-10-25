@@ -66,7 +66,7 @@
         <input
           ref="avatarInputRef"
           type="file"
-          accept="image/png"
+          accept="image/png,image/jpeg,image/webp"
           hidden
           @change="onAvatarPicked"
         />
@@ -243,6 +243,7 @@ import { NAlert, NButton, NInput, NPopconfirm, NSpin, NTag } from 'naive-ui';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { updateCharacter, exportCardJson, exportCardPngUrl, uploadAvatar } from '@/api/characters';
+import { toAvatarPng } from '@/api/avatar';
 import ContextPreviewDrawer from '@/components/ContextPreviewDrawer.vue';
 import { useChatStore } from '@/stores/chat';
 import { useCharacterStore } from '@/stores/characters';
@@ -284,7 +285,9 @@ async function onAvatarPicked(event: Event): Promise<void> {
   uploadingAvatar.value = true;
   error.value = null;
   try {
-    const updated = await uploadAvatar(current.id, file);
+    // 后端只收 PNG：浏览器端统一裁成正方形并转码，用户选 JPEG/照片也能用
+    const png = await toAvatarPng(file);
+    const updated = await uploadAvatar(current.id, png);
     character.value = updated;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);

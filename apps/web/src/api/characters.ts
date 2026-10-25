@@ -1,4 +1,5 @@
 import {
+  ADMIN_SEED_ENDPOINT,
   CHARACTERS_ENDPOINT,
   CHARACTER_IMPORT_ENDPOINT,
   characterAvatarEndpoint,
@@ -97,9 +98,26 @@ export function exportCardPngUrl(id: string): string {
   return characterExportPngEndpoint(id);
 }
 
-/** 直接导入一个已解析好的卡片对象（内置示例角色走这条）。 */
+/** 直接导入一个已解析好的卡片对象（第三方工具生成的卡片走这条）。 */
 export function importCharacterCard(card: unknown): Promise<Character> {
   return apiPost<Character>(CHARACTER_IMPORT_ENDPOINT, card, { timeoutMs: 15_000 });
+}
+
+/** 播种结果：谁新建了、谁只补了头像、谁被跳过。 */
+export interface SeedResult {
+  created: string[];
+  adopted: string[];
+  skipped: string[];
+  total: number;
+}
+
+/**
+ * 补回内置示例角色（服务端幂等播种）。
+ *
+ * 空库首次启动时后端已经自动做过一次，这里是手动重放入口。
+ */
+export function seedSampleCharacters(): Promise<SeedResult> {
+  return apiPost<SeedResult>(ADMIN_SEED_ENDPOINT, {}, { timeoutMs: 30_000 });
 }
 
 export interface ExportedCard {

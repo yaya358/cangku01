@@ -64,15 +64,16 @@
       </p>
 
       <div class="chars__empty-actions">
-        <n-button type="primary" size="small" :loading="importing" @click="importSamples">
-          一键导入 3 个示例角色
+        <n-button type="primary" size="small" :loading="importing" @click="seedSamples">
+          补回 8 个内置示例角色
         </n-button>
         <n-button size="small" @click="createOpen = true">自己新建一个</n-button>
       </div>
 
       <p class="chars__empty-hint">
-        示例角色是内置的原创素材（酒馆老板 / 夜巡人 / 吟游诗人），带完整人设与开场白，
-        导入后点「开始对话」就能聊 —— 也可以只看它们的写法，照着自己写一张。
+        示例角色（含头像）会在首次启动时自动写入；这里是把它们重新补回来的入口。
+        每个示例都演示一种写法：话痨老板、寡言巡夜人、只说「喵」的猫……
+        导入后点「开始对话」就能聊，也可以照着它们的写法自己造一张。
       </p>
     </div>
 
@@ -195,9 +196,9 @@ function onSearch(value: string): void {
   store.setSearch(value);
 }
 
-/** 一键导入内置示例角色。 */
-async function importSamples(): Promise<void> {
-  await store.importSamples();
+/** 补回内置示例角色（服务端播种，幂等）。 */
+async function seedSamples(): Promise<void> {
+  await store.seedSamples();
 }
 
 /** 新建成功后关掉弹窗并刷新列表（store 里已经刷过了）。 */

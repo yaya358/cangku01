@@ -50,6 +50,13 @@ export const ServerConfigSchema = z.strictObject({
    * 留 null 表示自动从仓库根找 apps/web/dist；找不到就不托管静态资源。
    */
   staticDir: z.string().min(1).nullable().default(null),
+  /**
+   * 首次启动时自动写入内置示例角色（带头像）。
+   *
+   * 只在角色表为空时生效 —— 目的是「clone 下来起服务就有东西可玩」，
+   * 而不是每次都往库里塞。老库不会被动。
+   */
+  seedSamples: z.boolean().default(true),
 });
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 
