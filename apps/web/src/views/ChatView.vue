@@ -25,6 +25,15 @@
             还没设定身份 —— 角色只能把你当陌生人。
             <button class="tool" type="button" @click="identityOpen = true">设定身份</button>
           </p>
+
+          <!-- 剧本进度：还差几步到结局，一眼看得见 -->
+          <p v-if="totalActs > 0" class="chat__progress">
+            第 {{ turn }} 轮 · 剧本 {{ seenActs }}/{{ totalActs }} 幕
+            <span v-if="nextAct" class="chat__progress-next">
+              · 下一幕第 {{ nextAct.atTurn }} 轮
+            </span>
+            <span v-else class="chat__progress-end">· 全部演完</span>
+          </p>
         </div>
       </div>
 
@@ -181,6 +190,7 @@ import { storeToRefs } from 'pinia';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { fetchCharacter } from '@/api/characters';
+import { listScriptEvents } from '@/api/script';
 import PlayerIdentityModal from '@/components/PlayerIdentityModal.vue';
 import { useChatStore } from '@/stores/chat';
 
@@ -192,6 +202,24 @@ const { messages, loading, streaming, error, conversation, isEmpty, branches, br
 const draft = ref('');
 const character = ref<Character | null>(null);
 const logRef = ref<HTMLElement | null>(null);
+
+/** 该角色的剧本（用来算进度） */
+const scriptEvents = ref<{ atTurn: number; title: string }[]>([]);
+
+/** 当前是第几轮 = 玩家已经发过几句 */
+const turn = computed(() => messages.value.filter((bubble) => bubble.role === 'user').length);
+
+const totalActs = computed(() => scriptEvents.value.length);
+
+/** 已演完几幕 */
+const seenActs = computed(
+  () => scriptEvents.value.filter((event) => event.atTurn <= turn.value).length,
+);
+
+/** 下一幕（还没到点的第一幕） */
+const nextAct = computed(
+  () => scriptEvents.value.find((event) => event.atTurn > turn.value) ?? null,
+);
 /** 身份编辑弹窗 */
 const identityOpen = ref(false);
 
@@ -243,6 +271,12 @@ async function loadAll(): Promise<void> {
       character.value = await fetchCharacter(characterId);
     } catch {
       character.value = null;
+    }
+    // 剧本只用来算进度；读失败不影响聊天
+    try {
+      scriptEvents.value = await listScriptEvents(characterId);
+    } catch {
+      scriptEvents.value = [];
     }
   }
 }
@@ -360,6 +394,21 @@ onBeforeUnmount(() => {
 
 .chat__me--empty {
   color: var(--text-faint);
+}
+
+.chat__progress {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.chat__progress-next {
+  color: var(--text-dim);
+}
+
+.chat__progress-end {
+  color: var(--err);
 }
 
 .chat__actions {

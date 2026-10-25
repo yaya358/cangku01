@@ -262,6 +262,9 @@
 
         <!-- 世界书：按关键词注入的设定，聊到这里才生效 -->
         <WorldbookPanel v-if="character" :character-id="character.id" />
+
+        <!-- 剧本：到第几轮发生什么事（最后一幕就是结局） -->
+        <ScriptPanel v-if="character" :character-id="character.id" />
       </div>
     </template>
 
@@ -292,6 +295,7 @@ import { updateCharacter, exportCardJson, exportCardPngUrl, uploadAvatar } from 
 import { toAvatarPng } from '@/api/avatar';
 import ContextPreviewDrawer from '@/components/ContextPreviewDrawer.vue';
 import WorldbookPanel from '@/components/WorldbookPanel.vue';
+import ScriptPanel from '@/components/ScriptPanel.vue';
 import PlayerIdentityModal from '@/components/PlayerIdentityModal.vue';
 import { useChatStore } from '@/stores/chat';
 import { useCharacterStore } from '@/stores/characters';
