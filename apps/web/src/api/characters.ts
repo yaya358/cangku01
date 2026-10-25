@@ -1,6 +1,7 @@
 import {
   CHARACTERS_ENDPOINT,
   CHARACTER_IMPORT_ENDPOINT,
+  characterAvatarEndpoint,
   characterEndpoint,
   characterExportJsonEndpoint,
   characterExportPngEndpoint,
@@ -47,6 +48,18 @@ export function updateCharacter(id: string, patch: CharacterPatch): Promise<Char
 
 export function deleteCharacter(id: string): Promise<{ id: string; deleted: boolean }> {
   return apiDelete<{ id: string; deleted: boolean }>(characterEndpoint(id));
+}
+
+/**
+ * 上传/替换头像。
+ *
+ * 导入 PNG 角色卡时头像随卡片一起进来；手动创建的角色用这个补上。
+ * 后端原字节落盘，不重新编码。
+ */
+export function uploadAvatar(id: string, png: Blob): Promise<Character> {
+  return postBinary<Character>(characterAvatarEndpoint(id), png, 'image/png', {
+    timeoutMs: 30_000,
+  });
 }
 
 /** 导入角色卡 PNG（图片本身就是一张卡，后端会把图存成头像）。 */

@@ -55,6 +55,22 @@
           <span v-else class="sheet__initial">{{ character.name.slice(0, 1) }}</span>
         </div>
 
+        <button
+          class="sheet__avatar-upload"
+          type="button"
+          :disabled="uploadingAvatar"
+          @click="pickAvatar"
+        >
+          {{ uploadingAvatar ? '上传中…' : '上传头像' }}
+        </button>
+        <input
+          ref="avatarInputRef"
+          type="file"
+          accept="image/png"
+          hidden
+          @change="onAvatarPicked"
+        />
+
         <h1 class="sheet__name">{{ character.name }}</h1>
 
         <div class="sheet__meta">
@@ -226,7 +242,7 @@ import type { Character, CharacterSource } from '@tavern/shared';
 import { NAlert, NButton, NInput, NPopconfirm, NSpin, NTag } from 'naive-ui';
 import { onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { updateCharacter, exportCardJson, exportCardPngUrl } from '@/api/characters';
+import { updateCharacter, exportCardJson, exportCardPngUrl, uploadAvatar } from '@/api/characters';
 import ContextPreviewDrawer from '@/components/ContextPreviewDrawer.vue';
 import { useChatStore } from '@/stores/chat';
 import { useCharacterStore } from '@/stores/characters';
@@ -250,6 +266,32 @@ const exporting = ref(false);
 const previewOpen = ref(false);
 /** 正在创建/打开会话 */
 const startingChat = ref(false);
+/** 头像上传 */
+const avatarInputRef = ref<HTMLInputElement | null>(null);
+const uploadingAvatar = ref(false);
+
+function pickAvatar(): void {
+  avatarInputRef.value?.click();
+}
+
+async function onAvatarPicked(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  const current = character.value;
+  if (!file || !current) return;
+
+  uploadingAvatar.value = true;
+  error.value = null;
+  try {
+    const updated = await uploadAvatar(current.id, file);
+    character.value = updated;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    uploadingAvatar.value = false;
+  }
+}
 
 /** 开始对话：有历史会话就进最近一个，没有就新建。 */
 async function startChat(): Promise<void> {
@@ -536,6 +578,26 @@ onMounted(() => {
   font-family: var(--font-mono);
   font-size: 52px;
   color: var(--border-strong);
+}
+
+.sheet__avatar-upload {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sheet__avatar-upload:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
+.sheet__avatar-upload:disabled {
+  cursor: progress;
+  opacity: 0.6;
 }
 
 .sheet__name {

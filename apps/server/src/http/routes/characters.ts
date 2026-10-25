@@ -7,6 +7,7 @@ import {
   CharacterPatchSchema,
 } from '@tavern/shared';
 import { AVATAR_MAX_BYTES } from '../../core/character/avatars.js';
+import { isPng } from '../../core/character/png.js';
 import { CardParseError, parseCardJson, toV2Card } from '../../core/character/card.js';
 import { buildCardPng, contentDisposition, safeFileName } from '../../core/character/export.js';
 import { extractCardFromPng, PngError } from '../../core/character/png.js';
@@ -143,6 +144,34 @@ export function registerCharacterRoutes(app: AppInstance): void {
         .send(buffer)
     );
   });
+
+  /**
+   * 上传/替换头像。
+   *
+   * 手动创建的角色一开始没有图，这里补一条路：直接 POST 一张 PNG。
+   * 走的是和导入角色卡完全相同的存储链路（原字节落盘，不重新编码）。
+   */
+  app.post(
+    `${CHARACTERS_ENDPOINT}/:id/avatar`,
+    { bodyLimit: AVATAR_MAX_BYTES },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const character = app.characters().getById(id);
+      if (!character) throw AppError.notFound(`角色不存在: ${id}`);
+
+      const buffer = request.body as Buffer;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        throw AppError.validation('请求体应为图片二进制（content-type: image/png）');
+      }
+      if (!isPng(buffer)) {
+        throw AppError.validation('头像必须是 PNG 格式');
+      }
+
+      const fileName = app.avatars.save(character.id, buffer);
+      const updated = app.characters().setAvatar(character.id, fileName);
+      return success(request.id, updated ?? character);
+    },
+  );
 
   /** 导出为 V2 卡片 JSON：前端拿到后自己组装成下载文件。 */
   app.get(`${CHARACTERS_ENDPOINT}/:id/export/json`, async (request) => {

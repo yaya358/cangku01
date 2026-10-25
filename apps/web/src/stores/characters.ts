@@ -9,7 +9,9 @@ import {
   fetchCharacters,
   importCharacterCard,
   importCharacterFile,
+  uploadAvatar,
 } from '@/api/characters';
+import { SAMPLE_AVATARS } from '@/samples/avatars';
 import { SAMPLE_CARDS } from '@/samples/cards';
 
 /** 搜索输入到请求之间的防抖时间。 */
@@ -21,6 +23,27 @@ const SEARCH_DEBOUNCE_MS = 300;
  * 列表与详情分开管理：列表只需要摘要，详情按 id 现取，
  * 避免把十几个角色的长文本（人设、示例对话）一次性读进内存。
  */
+/**
+ * 把内联的 base64 头像还原成 Blob。
+ *
+ * 走 base64 而不是静态资源 URL，是为了让「导入示例」在开发与生产环境下
+ * 行为完全一致（不需要额外的资源路径解析）。
+ */
+function sampleAvatarBlob(key: string): Blob | null {
+  const base64 = SAMPLE_AVATARS[key];
+  if (!base64) return null;
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: 'image/png' });
+  } catch {
+    return null;
+  }
+}
+
 export const useCharacterStore = defineStore('characters', () => {
   const items = ref<CharacterSummary[]>([]);
   const total = ref(0);
@@ -94,7 +117,13 @@ export const useCharacterStore = defineStore('characters', () => {
     }
   }
 
-  /** 一键导入内置示例角色；同名已存在的跳过，避免重复刷一堆。 */
+  /**
+   * 一键导入内置示例角色。
+   *
+   * 两件事：先建角色（同名跳过），再补头像。
+   * 头像单独走上传接口是因为「导入 JSON 卡」本身不带图，
+   * 而示例的头像内联在 samples/avatars.ts 里。
+   */
   async function importSamples(): Promise<number> {
     importing.value = true;
     importingName.value = '示例角色';
@@ -102,12 +131,27 @@ export const useCharacterStore = defineStore('characters', () => {
     let created = 0;
 
     try {
-      const existing = new Set(items.value.map((item) => item.name));
+      const byName = new Map(items.value.map((item) => [item.name, item]));
+      const needAvatar: Array<{ id: string; key: string }> = [];
+
       for (const sample of SAMPLE_CARDS) {
-        if (existing.has(sample.name)) continue;
-        await importCharacterCard(sample.card);
+        const existing = byName.get(sample.name);
+        if (existing) {
+          // 已经存在：只要没有头像就补一张，不重复建角色
+          if (!existing.avatarUrl) needAvatar.push({ id: existing.id, key: sample.avatarKey });
+          continue;
+        }
+
+        const character = await importCharacterCard(sample.card);
         created += 1;
+        needAvatar.push({ id: character.id, key: sample.avatarKey });
       }
+
+      for (const item of needAvatar) {
+        const blob = sampleAvatarBlob(item.key);
+        if (blob) await uploadAvatar(item.id, blob).catch(() => undefined);
+      }
+
       await refresh();
       return created;
     } catch (cause) {
