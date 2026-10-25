@@ -1,13 +1,16 @@
-import type { Character, CharacterList, CharacterSummary } from '@tavern/shared';
+import type { Character, CharacterInput, CharacterList, CharacterSummary } from '@tavern/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { ApiError } from '@/api/client';
 import {
+  createCharacter,
   deleteCharacter,
   fetchCharacter,
   fetchCharacters,
+  importCharacterCard,
   importCharacterFile,
 } from '@/api/characters';
+import { SAMPLE_CARDS } from '@/samples/cards';
 
 /** 搜索输入到请求之间的防抖时间。 */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -91,6 +94,42 @@ export const useCharacterStore = defineStore('characters', () => {
     }
   }
 
+  /** 一键导入内置示例角色；同名已存在的跳过，避免重复刷一堆。 */
+  async function importSamples(): Promise<number> {
+    importing.value = true;
+    importingName.value = '示例角色';
+    error.value = null;
+    let created = 0;
+
+    try {
+      const existing = new Set(items.value.map((item) => item.name));
+      for (const sample of SAMPLE_CARDS) {
+        if (existing.has(sample.name)) continue;
+        await importCharacterCard(sample.card);
+        created += 1;
+      }
+      await refresh();
+      return created;
+    } catch (cause) {
+      error.value = describeError(cause);
+      return created;
+    } finally {
+      importing.value = false;
+      importingName.value = null;
+    }
+  }
+
+  /** 手动新建（表单提交）。成功返回 null，失败返回错误文案。 */
+  async function createManual(input: CharacterInput): Promise<string | null> {
+    try {
+      await createCharacter(input);
+      await refresh();
+      return null;
+    } catch (cause) {
+      return describeError(cause);
+    }
+  }
+
   async function loadOne(id: string): Promise<Character | null> {
     try {
       return await fetchCharacter(id);
@@ -128,6 +167,8 @@ export const useCharacterStore = defineStore('characters', () => {
     refresh,
     setSearch,
     importFile,
+    importSamples,
+    createManual,
     loadOne,
     remove,
     clearError,

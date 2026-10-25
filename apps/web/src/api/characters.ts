@@ -84,6 +84,11 @@ export function exportCardPngUrl(id: string): string {
   return characterExportPngEndpoint(id);
 }
 
+/** 直接导入一个已解析好的卡片对象（内置示例角色走这条）。 */
+export function importCharacterCard(card: unknown): Promise<Character> {
+  return apiPost<Character>(CHARACTER_IMPORT_ENDPOINT, card, { timeoutMs: 15_000 });
+}
+
 export interface ExportedCard {
   filename: string;
   card: unknown;

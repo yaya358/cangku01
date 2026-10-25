@@ -24,6 +24,7 @@
           class="chars__search"
           @update:value="onSearch"
         />
+        <n-button size="small" @click="createOpen = true">新建</n-button>
         <n-button type="primary" size="small" :loading="importing" @click="pickFile">
           {{ importing ? '导入中…' : '导入角色卡' }}
         </n-button>
@@ -58,10 +59,20 @@
 
     <div v-else-if="isEmpty && !hasSearch" class="chars__empty">
       <p class="chars__empty-title">还没有角色</p>
-      <p class="chars__empty-desc">把一张角色卡 PNG 拖到页面任意位置，或点右上角「导入角色卡」。</p>
+      <p class="chars__empty-desc">
+        可以拖一张角色卡 PNG 进来、点「导入角色卡」，或者自己填一份设定。
+      </p>
+
+      <div class="chars__empty-actions">
+        <n-button type="primary" size="small" :loading="importing" @click="importSamples">
+          一键导入 3 个示例角色
+        </n-button>
+        <n-button size="small" @click="createOpen = true">自己新建一个</n-button>
+      </div>
+
       <p class="chars__empty-hint">
-        没有素材？在浏览器里跑一次试话页也能先聊起来 ——
-        角色的魅力在于长期扮演，可以先从空角色开始试。
+        示例角色是内置的原创素材（酒馆老板 / 夜巡人 / 吟游诗人），带完整人设与开场白，
+        导入后点「开始对话」就能聊 —— 也可以只看它们的写法，照着自己写一张。
       </p>
     </div>
 
@@ -118,6 +129,8 @@
       <span class="chars__foot-sep">·</span>
       <span>支持 V1 / V2 / V3 卡片，也支持带压缩文本块（zTXt）的图</span>
     </footer>
+
+    <CharacterCreateModal v-model:show="createOpen" @created="onCreate" />
   </section>
 </template>
 
@@ -126,6 +139,7 @@ import type { CharacterSource } from '@tavern/shared';
 import { NAlert, NButton, NInput, NSpin, NTag } from 'naive-ui';
 import { storeToRefs } from 'pinia';
 import { onMounted, ref } from 'vue';
+import CharacterCreateModal from '@/components/CharacterCreateModal.vue';
 import { useCharacterStore } from '@/stores/characters';
 
 const SOURCE_LABEL: Record<CharacterSource, string> = {
@@ -138,6 +152,7 @@ const store = useCharacterStore();
 const { items, total, search, loading, importing, error, isEmpty, hasSearch } = storeToRefs(store);
 
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const createOpen = ref(false);
 const dragging = ref(false);
 /** dragleave 在子元素间移动时会连发，用计数避免闪烁 */
 let dragDepth = 0;
@@ -178,6 +193,16 @@ async function onDrop(event: DragEvent): Promise<void> {
 
 function onSearch(value: string): void {
   store.setSearch(value);
+}
+
+/** 一键导入内置示例角色。 */
+async function importSamples(): Promise<void> {
+  await store.importSamples();
+}
+
+/** 新建成功后关掉弹窗并刷新列表（store 里已经刷过了）。 */
+function onCreate(): void {
+  createOpen.value = false;
 }
 
 onMounted(() => {
@@ -289,6 +314,14 @@ onMounted(() => {
   color: var(--text-faint);
   font-size: 12px;
   line-height: 1.7;
+}
+
+.chars__empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .chars__grid {
