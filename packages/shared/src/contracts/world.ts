@@ -39,6 +39,13 @@ export const SceneSchema = z.object({
 });
 export type Scene = z.infer<typeof SceneSchema>;
 
+/** 新建 / 重开存档的返回：一本故事 + 它的第一个场景。 */
+export const SaveStartedSchema = z.object({
+  save: SaveSchema,
+  scene: SceneSchema,
+});
+export type SaveStarted = z.infer<typeof SaveStartedSchema>;
+
 /**
  * 能不能联系上这个人。
  *

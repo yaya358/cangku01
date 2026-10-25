@@ -36,3 +36,30 @@ export function formatDateTime(iso: string): string {
     hour12: false,
   }).format(date);
 }
+
+/** 微信式相对时间：今天显示时刻，昨天显示「昨天」，更早显示日期。 */
+export function relativeTime(iso: string): string {
+  const time = new Date(iso);
+  if (Number.isNaN(time.getTime())) return '';
+
+  const now = new Date();
+  const sameDay =
+    time.getFullYear() === now.getFullYear() &&
+    time.getMonth() === now.getMonth() &&
+    time.getDate() === now.getDate();
+  if (sameDay) {
+    return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (
+    time.getFullYear() === yesterday.getFullYear() &&
+    time.getMonth() === yesterday.getMonth() &&
+    time.getDate() === yesterday.getDate()
+  ) {
+    return '昨天';
+  }
+
+  return `${time.getMonth() + 1} 月 ${time.getDate()} 日`;
+}

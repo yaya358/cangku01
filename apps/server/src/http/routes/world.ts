@@ -167,6 +167,49 @@ export function registerWorldRoutes(app: AppInstance): void {
   });
 
   /**
+   * 重新开始一个存档。
+   *
+   * 语义是「同一本故事，从头再演一遍」：名字、玩家、原来酒馆里那几个人都留着，
+   * 章节 / 情报 / 好感 / 对话全部清空。实现上直接删掉旧存档再按原样建一个新的 ——
+   * 逐表清空容易漏（消息、事实、好感、在场各自成表），删干净再建更不容易留下脏数据。
+   */
+  app.post(`${WORLD_SAVES_ENDPOINT}/:id/restart`, async (request) => {
+    const { id } = request.params as { id: string };
+    const save = app.world().getSave(id);
+    if (!save) throw AppError.notFound(`存档不存在: ${id}`);
+
+    // 记下原来那个公开场景的名字和在场的人，重开后原样摆回去
+    const scenes = app.world().listScenes(id);
+    const tavern = scenes.find((scene) => scene.kind === 'public') ?? scenes[0];
+    const cast = tavern
+      ? app
+          .world()
+          .present(tavern.id)
+          .map((entry) => entry.characterId)
+          .filter((characterId) => !!app.characters().getById(characterId))
+      : [];
+
+    app.world().deleteSave(id);
+
+    const created = app.world().createSave(save.name);
+    const scene = app.world().createScene(created.id, {
+      name: tavern?.name ?? '酒馆',
+      closeness: tavern?.closeness ?? 0.35,
+    });
+    for (const characterId of cast) app.world().enter(scene.id, characterId, 1, null);
+
+    return success(request.id, { save: created, scene });
+  });
+
+  /** 删掉一个存档。删了就真没了 —— 对话、场景、主线、好感一起走。 */
+  app.delete(`${WORLD_SAVES_ENDPOINT}/:id`, async (request) => {
+    const { id } = request.params as { id: string };
+    if (!app.world().getSave(id)) throw AppError.notFound(`存档不存在: ${id}`);
+    app.world().deleteSave(id);
+    return success(request.id, { deleted: true, saveId: id });
+  });
+
+  /**
    * 全世界的场景列表（"对话"页的入口）。
    *
    * 带上是哪个存档、此刻谁在、有几句、最后一句是什么 —— 迁移过来的旧对话

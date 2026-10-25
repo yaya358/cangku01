@@ -6,6 +6,7 @@ import type {
   MessageKind,
   PrivateSceneResult,
   Save,
+  SaveStarted,
   Scene,
   SceneDetail,
   SceneOpening,
@@ -14,7 +15,9 @@ import {
   WORLD_SAVES_ENDPOINT,
   WORLD_SCENES_ENDPOINT,
   worldSaveAffinityEndpoint,
+  worldSaveEndpoint,
   worldSaveJournalEndpoint,
+  worldSaveRestartEndpoint,
   worldSaveScenesEndpoint,
   worldSceneEndpoint,
   worldSceneOpeningEndpoint,
@@ -23,7 +26,7 @@ import {
   worldSceneStreamEndpoint,
 } from '@tavern/shared';
 import { fetchCharacters } from './characters';
-import { apiGet, apiPost } from './client';
+import { apiDelete, apiGet, apiPost } from './client';
 import { readSseStream, throwIfNotOk } from './sse';
 
 /**
@@ -60,8 +63,22 @@ export function listScenes(saveId: string): Promise<SceneSummary[]> {
   return apiGet<SceneSummary[]>(worldSaveScenesEndpoint(saveId), { timeoutMs: 10_000 });
 }
 
-export function createSave(input: CreateSaveInput): Promise<{ save: Save; scene: Scene }> {
-  return apiPost<{ save: Save; scene: Scene }>(WORLD_SAVES_ENDPOINT, input);
+export function createSave(input: CreateSaveInput): Promise<SaveStarted> {
+  return apiPost<SaveStarted>(WORLD_SAVES_ENDPOINT, input);
+}
+
+/**
+ * 重新开始：同一本故事、同样的名字和在场的人，进度清零。
+ *
+ * 返回新的 save 与第一个场景 —— 存档 id 会变，调用方要跳到新场景去。
+ */
+export function restartSave(saveId: string): Promise<SaveStarted> {
+  return apiPost<SaveStarted>(worldSaveRestartEndpoint(saveId), {});
+}
+
+/** 删除一个存档（连同它的场景、对话、主线一起）。 */
+export function removeSave(saveId: string): Promise<{ deleted: boolean }> {
+  return apiDelete<{ deleted: boolean }>(worldSaveEndpoint(saveId));
 }
 
 /** 场景详情：场景 + 在场者 + 名字对照表 + 当前分支的消息。 */

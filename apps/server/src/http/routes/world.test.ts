@@ -782,6 +782,108 @@ describe('开场 beat', () => {
   });
 });
 
+describe('存档：新建 / 载入 / 重新开始 / 删除', () => {
+  it('列表里能看到刚建的存档', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId } = await seedSave(app, '月灯镇', [boss]);
+
+      const list = await app.inject({ method: 'GET', url: '/api/world/saves' });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().data).toHaveLength(1);
+      expect(list.json().data[0]).toMatchObject({ id: saveId, name: '月灯镇', chapter: 1 });
+    });
+  });
+
+  it('重新开始：同一本故事、同样的人在酒馆，进度清零', async () => {
+    await withApp(async ({ app, streamRequests }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const patrol = await seedCharacter(app, '夜巡人');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss, patrol]);
+
+      // 先造一点进度：好感、情报、一轮对话
+      app.affinity().apply(saveId, boss, 9, '（用例安排）');
+      await speak(app, sceneId, '来一杯。');
+      const before = await sceneDetail(app, sceneId);
+      expect(before.messages.length).toBeGreaterThan(0);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/world/saves/${saveId}/restart`,
+      });
+      expect(response.statusCode).toBe(200);
+      const { save, scene } = response.json().data;
+
+      // 新存档：名字留着，id 换了，章节回到 1
+      expect(save.id).not.toBe(saveId);
+      expect(save.name).toBe('月灯镇');
+      expect(save.chapter).toBe(1);
+      // 场景名字照旧、人还在
+      expect(scene.name).toBe('月灯酒馆');
+      const detail = await sceneDetail(app, scene.id);
+      expect(detail.present.map((person: { name: string }) => person.name).sort()).toEqual(
+        ['夜巡人', '月灯老板'].sort(),
+      );
+      // 对话、情报、好感都清零
+      expect(detail.messages).toEqual([]);
+      const journal = await app.inject({
+        method: 'GET',
+        url: `/api/world/saves/${save.id}/journal`,
+      });
+      expect(journal.json().data.clues).toEqual([]);
+      expect(journal.json().data.progress.affinity).toBe(50);
+      expect(streamRequests.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('重新开始之后旧存档的对话不能再写进去', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+      await app.inject({ method: 'POST', url: `/api/world/saves/${saveId}/restart` });
+
+      // 旧场景已经删了：再往里说话应该 404，而不是写进一个没人管的库
+      const gone = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/stream`,
+        payload: { content: '还有人在吗？' },
+      });
+      expect(gone.statusCode).toBe(404);
+    });
+  });
+
+  it('删掉存档：场景和对话一起走', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { saveId, sceneId } = await seedSave(app, '月灯镇', [boss]);
+      await speak(app, sceneId, '来一杯。');
+
+      const response = await app.inject({ method: 'DELETE', url: `/api/world/saves/${saveId}` });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data).toMatchObject({ deleted: true, saveId });
+
+      const list = await app.inject({ method: 'GET', url: '/api/world/saves' });
+      expect(list.json().data).toEqual([]);
+      const scene = await app.inject({ method: 'GET', url: `/api/world/scenes/${sceneId}` });
+      expect(scene.statusCode).toBe(404);
+      const scenes = await app.inject({ method: 'GET', url: '/api/world/scenes' });
+      expect(scenes.json().data).toEqual([]);
+    });
+  });
+
+  it('不存在的存档：重开和删除都是 404', async () => {
+    await withApp(async ({ app }) => {
+      const restart = await app.inject({
+        method: 'POST',
+        url: '/api/world/saves/missing/restart',
+      });
+      expect(restart.statusCode).toBe(404);
+      const removed = await app.inject({ method: 'DELETE', url: '/api/world/saves/missing' });
+      expect(removed.statusCode).toBe(404);
+    });
+  });
+});
+
 describe('好感度', () => {
   it('每轮结束打一次分，并把变化写进库', async () => {
     await withApp(async ({ app, scoreCalls }) => {

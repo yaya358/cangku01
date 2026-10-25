@@ -48,6 +48,15 @@ export interface WorldRepository {
   getSave: (id: string) => WorldSave | undefined;
   listSaves: () => WorldSave[];
 
+  /**
+   * 删掉整个存档。
+   *
+   * 场景 / 在场 / 主线 / 情报 / 好感都挂在 save_id 上，外键会跟着删；
+   * 但对话（conversations）只挂了 scene_id 且没有外键，必须在这里一起清，
+   * 否则消息会变成一堆没有场景的孤儿。
+   */
+  deleteSave: (id: string) => void;
+
   createScene: (saveId: string, input: CreateSceneInput) => Scene;
   getScene: (id: string) => Scene | undefined;
   listScenes: (saveId: string) => Scene[];
@@ -149,6 +158,15 @@ export function createWorldRepository(db: DatabaseSync): WorldRepository {
         .prepare('SELECT * FROM saves ORDER BY updated_at DESC')
         .all() as unknown as SaveRow[];
       return rows.map(toSave);
+    },
+
+    deleteSave(id: string): void {
+      // 先清这个存档里所有场景的对话（连消息一起），再删存档本身
+      db.prepare(
+        `DELETE FROM conversations
+         WHERE scene_id IN (SELECT id FROM scenes WHERE save_id = ?)`,
+      ).run(id);
+      db.prepare('DELETE FROM saves WHERE id = ?').run(id);
     },
 
     createScene(saveId, input): Scene {

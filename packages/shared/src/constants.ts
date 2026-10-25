@@ -113,6 +113,16 @@ export function worldSaveScenesEndpoint(saveId: string): string {
   return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}/scenes`;
 }
 
+/** 存档本身（重开 / 删除都打这个） */
+export function worldSaveEndpoint(saveId: string): string {
+  return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}`;
+}
+
+/** 重新开始：名字和在场的人留住，进度全部清空 */
+export function worldSaveRestartEndpoint(saveId: string): string {
+  return `${worldSaveEndpoint(saveId)}/restart`;
+}
+
 /** 某存档里所有人对你的好感（界面上的好感条）。 */
 export function worldSaveAffinityEndpoint(saveId: string): string {
   return `${WORLD_SAVES_ENDPOINT}/${encodeURIComponent(saveId)}/affinity`;

@@ -13,6 +13,7 @@
       </div>
       <div class="conv__actions">
         <n-button size="small" :loading="entering" @click="enterTavern">进入酒馆</n-button>
+        <n-button size="small" @click="savesOpen = true">存档</n-button>
         <n-button type="primary" size="small" @click="pickerOpen = true">新对话</n-button>
       </div>
     </header>
@@ -201,6 +202,9 @@
       confirm-text="开始这一场"
       @submit="onIdentitySubmit"
     />
+
+    <!-- 存档：载入 / 重新开始 / 删除 / 新建 -->
+    <SavePanel v-model:show="savesOpen" @changed="loadAll" />
   </section>
 </template>
 
@@ -216,6 +220,7 @@ import type { SceneListItem } from '@/api/world';
 import { useChatStore } from '@/stores/chat';
 import { describeError } from '@/utils/errors';
 import PlayerIdentityModal from '@/components/PlayerIdentityModal.vue';
+import SavePanel from '@/components/SavePanel.vue';
 
 const router = useRouter();
 const store = useChatStore();
@@ -228,6 +233,8 @@ const loading = ref(false);
 const keyword = ref('');
 
 const pickerOpen = ref(false);
+/** 存档面板：载入 / 重开 / 删除 / 新建 */
+const savesOpen = ref(false);
 /** 大厅：勾选在场角色 */
 const hallOpen = ref(false);
 const hallMembers = ref<string[]>([]);
@@ -385,6 +392,12 @@ async function remove(id: string): Promise<void> {
   if (!confirm('删除这段对话？角色与世界书不受影响。')) return;
   const ok = await store.removeConversation(id);
   if (ok) list.value = list.value.filter((item) => item.id !== id);
+}
+
+/** 存档里改过东西（重开/删除/新建）之后，两边的列表都得重新拉一遍 */
+function loadAll(): void {
+  void load();
+  void loadScenes();
 }
 
 onMounted(() => {

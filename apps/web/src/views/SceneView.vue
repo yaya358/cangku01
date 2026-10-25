@@ -26,6 +26,10 @@
         <button class="tool" type="button" :disabled="loading || streaming" @click="reload">
           刷新现场
         </button>
+        <!-- 存档就在玩的地方给一个入口：想重开/换本故事，不用先退回列表 -->
+        <button class="tool" type="button" :disabled="loading" @click="savesOpen = true">
+          存档
+        </button>
       </div>
     </header>
 
@@ -350,6 +354,9 @@
         </aside>
       </div>
     </template>
+
+    <!-- 存档：载入 / 重新开始 / 删除 / 新建（和对话页共用同一个面板） -->
+    <SavePanel v-model:show="savesOpen" :current-save-id="scene?.saveId ?? null" />
   </section>
 </template>
 
@@ -365,6 +372,7 @@ import { NAlert, NButton, NInput, NSpin } from 'naive-ui';
 import { storeToRefs } from 'pinia';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import SavePanel from '@/components/SavePanel.vue';
 import { useSceneStore } from '@/stores/scene';
 
 /** 低声不是第六种「说什么」，而是「怎么说」：它按说话处理，只是加了压低声音。 */
@@ -489,6 +497,7 @@ async function addressFocus(whisper: boolean, withQuestion = false): Promise<voi
 /** 新手引导：只在第一次进世界里出现，点过就不再打扰 */
 const GUIDE_KEY = 'tavern.world.guide.v1';
 const showGuide = ref(false);
+const savesOpen = ref(false);
 
 function dismissGuide(): void {
   showGuide.value = false;
