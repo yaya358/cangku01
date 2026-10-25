@@ -105,6 +105,13 @@ export type ChatStreamPayload =
       userMessageId: string;
       assistantMessageId: string;
     }
+  | {
+      /** 重说完成：这条消息多了一个候选并已切过去 */
+      type: 'swiped';
+      messageId: string;
+      swipeIndex: number;
+      total: number;
+    }
   | { type: 'error'; code: string; message: string; retryable: boolean };
 
 /** 非流式接口的返回体。 */

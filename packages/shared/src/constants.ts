@@ -89,3 +89,8 @@ export function messageSwipeEndpoint(id: string): string {
 export function messageSwipeSelectEndpoint(id: string): string {
   return `${messageEndpoint(id)}/swipe/select`;
 }
+
+/** 重说：让模型重新生成这条回复（SSE）。 */
+export function messageRegenerateEndpoint(id: string): string {
+  return `${messageEndpoint(id)}/regenerate`;
+}

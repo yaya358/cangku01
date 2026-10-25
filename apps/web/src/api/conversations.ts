@@ -5,6 +5,8 @@ import {
   conversationMessagesEndpoint,
   conversationStreamEndpoint,
   messageEndpoint,
+  messageRegenerateEndpoint,
+  messageSwipeSelectEndpoint,
 } from '@tavern/shared';
 import { apiDelete, apiGet, apiPatch, apiPost } from './client';
 import { readSseStream, throwIfNotOk } from './sse';
@@ -79,4 +81,29 @@ export async function sendTurn(
 
   await throwIfNotOk(response);
   await readSseStream(response, handlers.onEvent);
+}
+
+/**
+ * 重说：让模型重新生成这条回复。
+ *
+ * 生成完服务端会追加一个候选并切过去，回一帧 `swiped` 事件。
+ */
+export async function regenerateMessage(
+  messageId: string,
+  handlers: SendTurnHandlers,
+): Promise<void> {
+  const response = await fetch(messageRegenerateEndpoint(messageId), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+    body: '{}',
+    signal: handlers.signal,
+  });
+
+  await throwIfNotOk(response);
+  await readSseStream(response, handlers.onEvent);
+}
+
+/** 切换候选回复，返回切换后的消息。 */
+export function selectSwipe(messageId: string, index: number): Promise<Message> {
+  return apiPost<Message>(messageSwipeSelectEndpoint(messageId), { index });
 }

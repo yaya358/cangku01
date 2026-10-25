@@ -12,6 +12,7 @@ import type { ServerResponse } from 'node:http';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { prepareConversationContext } from '../../core/context/index.js';
+import type { ProviderAdapter } from '../../core/provider/index.js';
 import type { AppInstance } from '../../types/fastify.js';
 import { resolveProvider } from '../chat-support.js';
 import { success } from '../envelope.js';
@@ -204,88 +205,41 @@ export function registerConversationRoutes(app: AppInstance): void {
     reply.hijack();
     const raw = reply.raw;
     raw.on('close', onClientClose);
-    raw.writeHead(200, {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-cache, no-transform',
-      connection: 'keep-alive',
-      'x-accel-buffering': 'no',
-    });
-    raw.write(': connected\n\n');
-    raw.on('error', () => controller.abort());
 
-    writeEvent(raw, {
-      type: 'start',
-      traceId: request.id,
-      provider: provider.meta.name,
+    const result = await pipeProviderStream({
+      raw,
+      signal: controller.signal,
+      provider,
       model,
-      character: { id: character.id, name: character.name },
-      contextTokens: prepared.budget.used,
-      worldbookHits: prepared.worldbook.hits.length,
+      messages: prepared.messages,
+      traceId: request.id,
+      meta: {
+        character: { id: character.id, name: character.name },
+        contextTokens: prepared.budget.used,
+        worldbookHits: prepared.worldbook.hits.length,
+      },
+      onError: (error) => {
+        request.log.error({ err: error }, '会话生成异常');
+      },
     });
-
-    let text = '';
-    let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
-    let finishReason: string | null = null;
-    let firstTokenMs: number | null = null;
-    let durationMs = 0;
-    let failed = false;
-
-    try {
-      for await (const event of provider.stream(
-        { model, messages: prepared.messages },
-        { signal: controller.signal, requestId: request.id },
-      )) {
-        if (event.type === 'start') continue;
-
-        if (event.type === 'delta') {
-          text += event.text;
-          writeEvent(raw, event);
-          continue;
-        }
-        if (event.type === 'usage') {
-          usage = event.usage;
-          writeEvent(raw, event);
-          continue;
-        }
-        if (event.type === 'done') {
-          finishReason = event.finishReason;
-          durationMs = event.durationMs;
-          firstTokenMs = event.firstTokenMs;
-          usage = event.usage ?? usage;
-          writeEvent(raw, event);
-          break;
-        }
-        if (event.type === 'error') {
-          failed = true;
-          writeEvent(raw, { type: 'error', ...event.error });
-          break;
-        }
-      }
-    } catch (error) {
-      failed = true;
-      const appError = toAppError(error);
-      request.log.error({ err: error, code: appError.code }, '会话生成异常');
-      writeEvent(raw, {
-        type: 'error',
-        code: appError.code,
-        message: appError.message,
-        retryable: false,
-      });
-    }
 
     // 落库：有内容就存（包括被取消/出错时已生成的部分，避免用户白等）
     let assistantId: string | null = null;
-    if (text.length > 0) {
+    if (result.text.length > 0) {
       const assistant = messagesRepo.append(id, {
         role: 'assistant',
-        content: text,
+        content: result.text,
         parentId: userMessage.id,
         model,
         provider: provider.meta.name,
-        ...(usage ? { usage } : {}),
-        ...(finishReason ? { finishReason } : failed ? { finishReason: 'interrupted' } : {}),
-        durationMs,
-        ...(firstTokenMs === null ? {} : { firstTokenMs }),
+        ...(result.usage ? { usage: result.usage } : {}),
+        ...(result.finishReason
+          ? { finishReason: result.finishReason }
+          : result.failed
+            ? { finishReason: 'interrupted' }
+            : {}),
+        durationMs: result.durationMs,
+        ...(result.firstTokenMs === null ? {} : { firstTokenMs: result.firstTokenMs }),
       });
       assistantId = assistant.id;
       conversationsRepo.touch(id, assistant.id);
@@ -306,11 +260,234 @@ export function registerConversationRoutes(app: AppInstance): void {
         conversationId: id,
         provider: provider.meta.name,
         model,
-        chars: text.length,
-        aborted: controller.signal.aborted,
+        chars: result.text.length,
+        aborted: result.aborted,
         assistantId,
       },
       'chat turn finished',
     );
   });
+
+  // ---------- 重说 ----------
+
+  /**
+   * 让模型重新生成这条助手回复。
+   *
+   * 关键点：历史要**截到这条消息之前**，否则模型会看到自己刚才那版，
+   * 生成出来往往只是换个说法复读。生成完追加成一个新候选并切过去。
+   */
+  app.post(`${MESSAGES_ENDPOINT}/:id/regenerate`, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const target = app.messages().getById(id);
+    if (!target) throw AppError.notFound(`消息不存在: ${id}`);
+    if (target.role !== 'assistant') throw AppError.badRequest('只能对助手的回复重说');
+
+    const conversation = app.conversations().getById(target.conversationId);
+    if (!conversation) throw AppError.notFound('该消息所属会话已不存在');
+
+    const character = app.characters().getById(conversation.characterId);
+    if (!character) throw AppError.notFound('该会话关联的角色已被删除');
+
+    const messagesRepo = app.messages();
+    const all = messagesRepo.listByConversation(target.conversationId);
+    const position = all.findIndex((message) => message.id === id);
+
+    const before = all
+      .slice(0, Math.max(0, position))
+      .filter((message) => message.role !== 'system');
+
+    const lastUserIndex = before.map((message) => message.role).lastIndexOf('user');
+    if (lastUserIndex < 0) {
+      throw AppError.badRequest('这条回复之前没有用户发言，无法重说');
+    }
+
+    const userInput = before[lastUserIndex]?.content ?? '';
+    const historyBefore = before
+      .slice(0, lastUserIndex)
+      .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
+
+    const provider = resolveProvider(app, undefined);
+    const model = provider.defaultModel;
+
+    const prepared = prepareConversationContext({
+      character,
+      entries: app.worldbook().listForCharacter(character.id),
+      messages: [...historyBefore, { role: 'user', content: userInput }],
+    });
+
+    const controller = new AbortController();
+    const onClientClose = (): void => controller.abort();
+
+    reply.hijack();
+    const raw = reply.raw;
+    raw.on('close', onClientClose);
+
+    const result = await pipeProviderStream({
+      raw,
+      signal: controller.signal,
+      provider,
+      model,
+      messages: prepared.messages,
+      traceId: request.id,
+      meta: {
+        character: { id: character.id, name: character.name },
+        contextTokens: prepared.budget.used,
+        worldbookHits: prepared.worldbook.hits.length,
+      },
+      onError: (error) => {
+        request.log.error({ err: error }, '重说生成异常');
+      },
+    });
+
+    if (result.text.length > 0) {
+      // appendSwipe 会：把旧正文补成第 0 个候选 → 追加新文本 → 切到新候选
+      const updated = messagesRepo.appendSwipe(id, result.text);
+      if (updated) {
+        // 元信息换成这一版的，界面上的耗时/用量才不会停在上一版
+        messagesRepo.updateMeta(id, {
+          model,
+          provider: provider.meta.name,
+          ...(result.usage ? { usage: result.usage } : {}),
+          ...(result.finishReason ? { finishReason: result.finishReason } : {}),
+          durationMs: result.durationMs,
+          ...(result.firstTokenMs === null ? {} : { firstTokenMs: result.firstTokenMs }),
+        });
+
+        writeEvent(raw, {
+          type: 'swiped',
+          messageId: id,
+          swipeIndex: updated.swipeIndex,
+          total: updated.swipes.length,
+        });
+      }
+      app.conversations().touch(conversation.id, id);
+    }
+
+    raw.off('close', onClientClose);
+    raw.end();
+
+    request.log.info(
+      {
+        conversationId: conversation.id,
+        messageId: id,
+        chars: result.text.length,
+        aborted: result.aborted,
+      },
+      'regenerate finished',
+    );
+  });
+}
+
+/** 流式结果聚合。 */
+interface PipeResult {
+  text: string;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  finishReason: string | null;
+  durationMs: number;
+  firstTokenMs: number | null;
+  failed: boolean;
+  aborted: boolean;
+}
+
+interface PipeOptions {
+  raw: ServerResponse;
+  signal: AbortSignal;
+  provider: ProviderAdapter;
+  model: string;
+  messages: ChatMessage[];
+  traceId: string;
+  meta?: {
+    character?: { id: string; name: string };
+    contextTokens?: number;
+    worldbookHits?: number;
+  };
+  onError?: (error: unknown) => void;
+}
+
+/**
+ * 把 provider 的流搬进 SSE 响应。
+ *
+ * 抽出来是因为「一轮生成」和「重说」的流式部分是同一套：
+ * 写头 → 写 start → 转发 delta/usage/done → 出错写 error。
+ * 差异只在最后怎么落库，那部分留给各自的调用方。
+ */
+async function pipeProviderStream(options: PipeOptions): Promise<PipeResult> {
+  const { raw, signal, provider, model, messages, traceId, meta } = options;
+
+  raw.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    // no-transform + x-accel-buffering:no 防止反代缓冲，否则前端一个字都收不到
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  });
+  raw.write(': connected\n\n');
+  raw.on('error', () => {
+    // 连接坏了就尽快收尾，别继续占用上游
+  });
+
+  writeEvent(raw, {
+    type: 'start',
+    traceId,
+    provider: provider.meta.name,
+    model,
+    ...(meta?.character ? { character: meta.character } : {}),
+    ...(meta?.contextTokens === undefined ? {} : { contextTokens: meta.contextTokens }),
+    ...(meta?.worldbookHits === undefined ? {} : { worldbookHits: meta.worldbookHits }),
+  });
+
+  const result: PipeResult = {
+    text: '',
+    finishReason: null,
+    durationMs: 0,
+    firstTokenMs: null,
+    failed: false,
+    aborted: signal.aborted,
+  };
+
+  try {
+    for await (const event of provider.stream(
+      { model, messages },
+      { signal, requestId: traceId },
+    )) {
+      if (event.type === 'start') continue;
+
+      if (event.type === 'delta') {
+        result.text += event.text;
+        writeEvent(raw, event);
+        continue;
+      }
+      if (event.type === 'usage') {
+        result.usage = event.usage;
+        writeEvent(raw, event);
+        continue;
+      }
+      if (event.type === 'done') {
+        result.finishReason = event.finishReason;
+        result.durationMs = event.durationMs;
+        result.firstTokenMs = event.firstTokenMs;
+        result.usage = event.usage ?? result.usage;
+        result.aborted = signal.aborted;
+        writeEvent(raw, event);
+        break;
+      }
+      if (event.type === 'error') {
+        result.failed = true;
+        writeEvent(raw, { type: 'error', ...event.error });
+        break;
+      }
+    }
+  } catch (error) {
+    result.failed = true;
+    options.onError?.(error);
+    const appError = toAppError(error);
+    writeEvent(raw, {
+      type: 'error',
+      code: appError.code,
+      message: appError.message,
+      retryable: false,
+    });
+  }
+
+  return result;
 }

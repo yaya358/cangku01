@@ -23,6 +23,8 @@ async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
   config.storage.path = path.join(dir, 'test.db');
 
   const requests: ChatRequest[] = [];
+  /** 第几次流式调用，用来让每次生成的内容不同 */
+  let streamCalls = 0;
   const provider = defineProvider({
     meta: { name: 'fake', version: '1.0.0' },
     capabilities: { streaming: true },
@@ -40,15 +42,19 @@ async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
     },
     async *stream(request) {
       requests.push(request);
+      // 第几次调用就吐第几版，便于断言「重说真的换了内容」
+      streamCalls += 1;
+      const suffix = streamCalls === 1 ? '' : String(streamCalls);
       yield { type: 'start' as const, model: 'fake-model', at: Date.now() };
       yield { type: 'delta' as const, text: '酒' };
-      yield { type: 'delta' as const, text: '来了' };
+      yield { type: 'delta' as const, text: `来了${suffix}` };
       yield {
         type: 'done' as const,
         finishReason: 'stop',
-        durationMs: 1234,
-        firstTokenMs: 456,
-        usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+        // 每次调用的耗时/用量都不同，用来验证「元信息跟着当前候选走」
+        durationMs: 1000 + streamCalls * 100,
+        firstTokenMs: 400 + streamCalls * 10,
+        usage: { promptTokens: 10, completionTokens: 2, totalTokens: 10 + streamCalls * 2 },
       };
     },
   });
@@ -208,14 +214,17 @@ describe('消息接口', () => {
         url: `/api/messages/${first}/swipe`,
         payload: { content: '候选一' },
       });
-      expect(swipe1.json().data.swipes).toEqual(['候选一']);
+      // 原开场白是第 0 个候选，新候选排第二
+      expect(swipe1.json().data.swipes).toEqual(['哟，这个点还来？', '候选一']);
+      expect(swipe1.json().data.content).toBe('候选一');
 
       const swipe2 = await app.inject({
         method: 'POST',
         url: `/api/messages/${first}/swipe`,
         payload: { content: '候选二' },
       });
-      expect(swipe2.json().data.swipeIndex).toBe(1);
+      expect(swipe2.json().data.swipeIndex).toBe(2);
+      expect(swipe2.json().data.content).toBe('候选二');
 
       const selected = await app.inject({
         method: 'POST',
@@ -223,6 +232,7 @@ describe('消息接口', () => {
         payload: { index: 0 },
       });
       expect(selected.json().data.swipeIndex).toBe(0);
+      expect(selected.json().data.content).toBe('哟，这个点还来？');
 
       const bad = await app.inject({
         method: 'POST',
@@ -278,8 +288,8 @@ describe('一轮生成（/stream）', () => {
         role: 'assistant',
         content: '酒来了',
         finishReason: 'stop',
-        firstTokenMs: 456,
-        durationMs: 1234,
+        firstTokenMs: 410,
+        durationMs: 1100,
       });
       expect(messages[2].parentId).toBe(messages[1].id);
       expect(messages[2].usage.totalTokens).toBe(12);
@@ -342,6 +352,99 @@ describe('一轮生成（/stream）', () => {
         await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
       ).json().data.messages;
       expect(messages).toHaveLength(3);
+    });
+  });
+});
+
+describe('重说（/regenerate）', () => {
+  it('生成新候选并切过去，原来那版保留在 swipes 里', async () => {
+    await withApp(async ({ app, requests }) => {
+      const characterId = await seedCharacter(app);
+      const conversation = (
+        await app.inject({ method: 'POST', url: '/api/conversations', payload: { characterId } })
+      ).json().data;
+
+      const address = await app.listen({ host: '127.0.0.1', port: 0 });
+
+      // 先正常聊一轮，得到一条助手回复
+      await fetch(`${address}/api/conversations/${conversation.id}/stream`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: '来一杯' }),
+      }).then((response) => response.text());
+
+      const before = (
+        await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
+      ).json().data.messages;
+      const assistant = before.at(-1);
+      expect(assistant.content).toBe('酒来了');
+      expect(assistant.swipes).toEqual(['酒来了']);
+
+      // 重说
+      const response = await fetch(`${address}/api/messages/${assistant.id}/regenerate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const frames = parseFrames(await response.text());
+
+      const swiped = frames.find((frame) => frame.type === 'swiped');
+      expect(swiped).toMatchObject({ messageId: assistant.id, swipeIndex: 1, total: 2 });
+
+      const after = (
+        await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
+      ).json().data.messages;
+      const regenerated = after.at(-1);
+
+      // 正文换成新版，旧版还在候选里，消息条数不变
+      expect(regenerated.content).toBe('酒来了2');
+      expect(regenerated.swipes).toEqual(['酒来了', '酒来了2']);
+      expect(regenerated.swipeIndex).toBe(1);
+      expect(after).toHaveLength(before.length);
+
+      // 关键：发给模型的上下文不能包含被重说的那条回复（否则会复读自己）
+      const request = requests.at(-1);
+      expect(request?.messages.some((message) => message.content === '酒来了')).toBe(false);
+      expect(request?.messages.some((message) => message.content === '来一杯')).toBe(true);
+
+      // 元信息跟着新候选走：第一次 1100ms/12tokens，重说后 1200ms/14tokens
+      expect(regenerated.durationMs).toBe(1200);
+      expect(regenerated.firstTokenMs).toBe(420);
+      expect(regenerated.usage.totalTokens).toBe(14);
+    });
+  });
+
+  it('对用户消息重说返回 400', async () => {
+    await withApp(async ({ app }) => {
+      const characterId = await seedCharacter(app);
+      const conversation = (
+        await app.inject({ method: 'POST', url: '/api/conversations', payload: { characterId } })
+      ).json().data;
+
+      const appended = await app.inject({
+        method: 'POST',
+        url: `/api/conversations/${conversation.id}/messages`,
+        payload: { role: 'user', content: '我说的话' },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/messages/${appended.json().data.id}/regenerate`,
+        payload: {},
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe('BAD_REQUEST');
+    });
+  });
+
+  it('消息不存在时 404', async () => {
+    await withApp(async ({ app }) => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/messages/nope/regenerate',
+        payload: {},
+      });
+      expect(response.statusCode).toBe(404);
     });
   });
 });

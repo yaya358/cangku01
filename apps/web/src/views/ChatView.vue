@@ -41,6 +41,40 @@
           {{ bubble.content
           }}<span v-if="bubble.pending" class="bubble__caret" aria-hidden="true" />
         </p>
+
+        <div v-if="bubble.role === 'assistant'" class="bubble__tools">
+          <template v-if="bubble.swipes.length > 1">
+            <button
+              class="tool"
+              type="button"
+              :disabled="bubble.swipeIndex === 0 || streaming"
+              title="上一版"
+              @click="store.switchSwipe(bubble.id, bubble.swipeIndex - 1)"
+            >
+              ‹
+            </button>
+            <span class="tool__page">{{ bubble.swipeIndex + 1 }}/{{ bubble.swipes.length }}</span>
+            <button
+              class="tool"
+              type="button"
+              :disabled="bubble.swipeIndex >= bubble.swipes.length - 1 || streaming"
+              title="下一版"
+              @click="store.switchSwipe(bubble.id, bubble.swipeIndex + 1)"
+            >
+              ›
+            </button>
+          </template>
+          <button
+            class="tool tool--regen"
+            type="button"
+            :disabled="streaming || bubble.optimistic"
+            title="让模型换个说法重新生成"
+            @click="store.regenerate(bubble.id)"
+          >
+            重说
+          </button>
+        </div>
+
         <p v-if="bubble.meta && bubble.role === 'assistant'" class="bubble__meta">
           <span v-if="bubble.meta.firstTokenMs">首字 {{ bubble.meta.firstTokenMs }}ms</span>
           <span v-if="bubble.meta.durationMs">· 总 {{ bubble.meta.durationMs }}ms</span>
@@ -310,6 +344,51 @@ onBeforeUnmount(() => {
 
 .bubble__meta {
   padding: 0 6px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+/* 重说 / 候选翻页 */
+.bubble__tools {
+  display: flex;
+  padding: 0 2px;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.bubble:hover .bubble__tools {
+  opacity: 1;
+}
+
+.tool {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.tool:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
+.tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.tool--regen {
+  margin-left: 4px;
+}
+
+.tool__page {
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 10.5px;

@@ -7,6 +7,8 @@ import {
   deleteConversation,
   fetchConversation,
   listConversations,
+  regenerateMessage,
+  selectSwipe,
   sendTurn,
 } from '@/api/conversations';
 
@@ -16,6 +18,10 @@ export interface ChatBubble {
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: string;
+  /** 该位置的全部候选（重说累积），用户消息为空 */
+  swipes: string[];
+  /** 当前候选下标 */
+  swipeIndex: number;
   /** 正在接收流（显示光标） */
   pending?: boolean;
   /** 乐观插入、还没被服务端确认 */
@@ -58,6 +64,8 @@ export const useChatStore = defineStore('chat', () => {
       role: message.role,
       content: message.content,
       createdAt: message.createdAt,
+      swipes: message.swipes,
+      swipeIndex: message.swipeIndex,
       meta: {
         model: message.model,
         firstTokenMs: message.firstTokenMs,
@@ -122,6 +130,8 @@ export const useChatStore = defineStore('chat', () => {
       role: 'user',
       content: text,
       createdAt: new Date().toISOString(),
+      swipes: [],
+      swipeIndex: 0,
       optimistic: true,
     });
 
@@ -131,6 +141,8 @@ export const useChatStore = defineStore('chat', () => {
       role: 'assistant',
       content: '',
       createdAt: new Date().toISOString(),
+      swipes: [],
+      swipeIndex: 0,
       pending: true,
       optimistic: true,
     });
@@ -166,7 +178,12 @@ export const useChatStore = defineStore('chat', () => {
             case 'saved':
               // 用真实 id 替换临时 id，后续操作（重说/编辑）才有对象可用
               patch(tempUserId, { id: event.userMessageId, optimistic: false });
-              patch(tempAssistantId, { id: event.assistantMessageId, optimistic: false });
+              patch(tempAssistantId, {
+                id: event.assistantMessageId,
+                optimistic: false,
+                swipes: [messages.value.find((b) => b.id === tempAssistantId)?.content ?? ''],
+                swipeIndex: 0,
+              });
               break;
             case 'error':
               error.value = `${event.message}${event.retryable ? '（可重试）' : ''}`;
@@ -211,6 +228,72 @@ export const useChatStore = defineStore('chat', () => {
     controller?.abort();
   }
 
+  /**
+   * 重说：让模型重新生成这条助手回复。
+   *
+   * 服务端会把新版追加成候选并切过去，所以这里把流式内容直接写进同一个气泡，
+   * 收到 swiped 事件后把候选列表补上 —— 旧版仍然可以左右切回来。
+   */
+  async function regenerate(messageId: string): Promise<void> {
+    if (streaming.value) return;
+    const target = messages.value.find((bubble) => bubble.id === messageId);
+    if (!target || target.role !== 'assistant') return;
+
+    error.value = null;
+    streaming.value = true;
+    controller = new AbortController();
+    target.pending = true;
+    target.content = '';
+
+    try {
+      await regenerateMessage(messageId, {
+        signal: controller.signal,
+        onEvent: (event: ChatStreamPayload) => {
+          if (event.type === 'delta') {
+            target.content += event.text;
+          } else if (event.type === 'done') {
+            target.pending = false;
+            target.meta = {
+              firstTokenMs: event.firstTokenMs,
+              durationMs: event.durationMs,
+              totalTokens: event.usage?.totalTokens ?? null,
+            };
+          } else if (event.type === 'swiped') {
+            target.swipeIndex = event.swipeIndex;
+            // 只有当服务端确实多了一个候选时才追加，避免重复点导致列表错乱
+            if (event.total > target.swipes.length) {
+              target.swipes = [...target.swipes, target.content];
+            }
+          } else if (event.type === 'error') {
+            error.value = event.message;
+          }
+        },
+      });
+    } catch (cause) {
+      error.value = describeError(cause);
+    } finally {
+      streaming.value = false;
+      controller = null;
+      target.pending = false;
+    }
+  }
+
+  /** 切换候选回复（左右翻页）。 */
+  async function switchSwipe(messageId: string, index: number): Promise<void> {
+    const target = messages.value.find((bubble) => bubble.id === messageId);
+    if (!target || streaming.value) return;
+    if (index < 0 || index >= target.swipes.length) return;
+
+    try {
+      const updated = await selectSwipe(messageId, index);
+      target.content = updated.content;
+      target.swipeIndex = updated.swipeIndex;
+      target.swipes = updated.swipes;
+    } catch (cause) {
+      error.value = describeError(cause);
+    }
+  }
+
   async function removeConversation(id: string): Promise<boolean> {
     try {
       await deleteConversation(id);
@@ -240,6 +323,8 @@ export const useChatStore = defineStore('chat', () => {
     open,
     startWith,
     send,
+    regenerate,
+    switchSwipe,
     stop,
     removeConversation,
     clearError,

@@ -189,19 +189,50 @@ describe('消息仓储', () => {
     const conversation = conversations.create({ characterId });
     const message = messages.append(conversation.id, { role: 'assistant', content: '第一版' });
 
+    // 助手消息天生就是第 0 个候选，重说不会把原来那版弄丢
+    expect(message.swipes).toEqual(['第一版']);
+    expect(message.swipeIndex).toBe(0);
+
     const second = messages.appendSwipe(message.id, '第二版');
-    expect(second?.swipes).toEqual(['第二版']);
-    expect(second?.swipeIndex).toBe(0);
+    expect(second?.swipes).toEqual(['第一版', '第二版']);
+    expect(second?.swipeIndex).toBe(1);
+    expect(second?.content).toBe('第二版');
 
     const third = messages.appendSwipe(message.id, '第三版');
-    expect(third?.swipes).toEqual(['第二版', '第三版']);
-    expect(third?.swipeIndex).toBe(1);
+    expect(third?.swipes).toEqual(['第一版', '第二版', '第三版']);
+    expect(third?.content).toBe('第三版');
 
+    // 切回第一个候选：正文必须跟着走，否则「展示的」和「参与上下文的」会不一致
     const back = messages.selectSwipe(message.id, 0);
     expect(back?.swipeIndex).toBe(0);
+    expect(back?.content).toBe('第一版');
 
     // 越界下标不改动
     expect(messages.selectSwipe(message.id, 99)).toBeUndefined();
+  });
+
+  it('用户消息不带候选', () => {
+    const conversation = conversations.create({ characterId });
+    const message = messages.append(conversation.id, { role: 'user', content: '我说的话' });
+
+    expect(message.swipes).toEqual([]);
+    expect(message.swipeIndex).toBe(0);
+  });
+
+  it('编辑有候选的消息会同步改当前候选', () => {
+    const conversation = conversations.create({ characterId });
+    const message = messages.append(conversation.id, { role: 'assistant', content: '原始' });
+    messages.appendSwipe(message.id, '第二版');
+
+    // 当前是第二版，编辑它
+    const edited = messages.updateContent(message.id, '第二版（改过）');
+    expect(edited?.content).toBe('第二版（改过）');
+    expect(edited?.swipes[1]).toBe('第二版（改过）');
+
+    // 切回第一版再切回来，改动还在
+    messages.selectSwipe(message.id, 0);
+    const back = messages.selectSwipe(message.id, 1);
+    expect(back?.content).toBe('第二版（改过）');
   });
 
   it('删除会话后消息计数归零，单条删除可用', () => {
