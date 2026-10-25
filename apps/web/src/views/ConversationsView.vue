@@ -35,6 +35,43 @@
       —— 挑几个人同场轮流接话，等价于「进一个场景」，保留是为了兼容旧记录。
     </p>
 
+    <!-- 场景：世界模式的入口。旧对话迁移过来之后也在这里，不藏在库里 -->
+    <section v-if="scenes.length > 0" class="scenes">
+      <div class="scenes__head">
+        <h2 class="scenes__title">场景</h2>
+        <span class="scenes__hint">点进去就是那个地方 —— 在场的人才会接你的话</span>
+      </div>
+
+      <ul class="scene-list">
+        <li v-for="item in scenes" :key="item.id">
+          <RouterLink class="scene-item" :to="`/scenes/${item.id}`">
+            <span class="scene-item__badge" :class="`scene-item__badge--${item.kind}`">
+              {{ item.kind === 'private' ? '私聊' : '公开' }}
+            </span>
+
+            <span class="scene-item__main">
+              <span class="scene-item__row">
+                <span class="scene-item__name">{{ item.name }}</span>
+                <span class="scene-item__time">{{ relativeTime(item.updatedAt) }}</span>
+              </span>
+              <span class="scene-item__row">
+                <span class="scene-item__preview">{{ item.preview || '（还没有人开口）' }}</span>
+                <span v-if="item.messageCount > 0" class="chat-item__badge">
+                  {{ item.messageCount }}
+                </span>
+              </span>
+              <span class="scene-item__people">
+                {{ item.saveName }} · {{ item.presentCount }} 人在场
+                <template v-if="item.presentNames.length > 0">
+                  （{{ item.presentNames.join('、') }}）
+                </template>
+              </span>
+            </span>
+          </RouterLink>
+        </li>
+      </ul>
+    </section>
+
     <div v-if="loading" class="conv__loading">
       <n-spin size="small" />
       <span>正在读取对话…</span>
@@ -45,10 +82,9 @@
     </p>
 
     <div v-else-if="list.length === 0" class="conv__empty">
-      <p>还没有对话。</p>
+      <p>还没有按角色的旧对话。</p>
       <p class="conv__empty-hint">
-        点右上「新对话」挑一个角色开始；或者去
-        <RouterLink to="/characters">角色页</RouterLink> 看看那 8 个人。
+        点右上「进入酒馆」去场景里说话；或者用「新对话」挑一个角色单独聊。
       </p>
     </div>
 
@@ -175,7 +211,8 @@ import { NAlert, NButton, NInput, NModal, NSpin } from 'naive-ui';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { fetchCharacters } from '@/api/characters';
-import { ensureDefaultScene } from '@/api/world';
+import { ensureDefaultScene, listAllScenes } from '@/api/world';
+import type { SceneListItem } from '@/api/world';
 import { useChatStore } from '@/stores/chat';
 import { describeError } from '@/utils/errors';
 import PlayerIdentityModal from '@/components/PlayerIdentityModal.vue';
@@ -184,6 +221,8 @@ const router = useRouter();
 const store = useChatStore();
 
 const list = ref<Conversation[]>([]);
+/** 场景列表：世界模式的入口，也是迁移过来的旧对话的去处 */
+const scenes = ref<SceneListItem[]>([]);
 const characters = ref<CharacterSummary[]>([]);
 const loading = ref(false);
 const keyword = ref('');
@@ -258,6 +297,15 @@ async function load(): Promise<void> {
     characters.value = characterList.items;
   } finally {
     loading.value = false;
+  }
+}
+
+/** 场景列表读失败不该挡住页面：旧对话还能接着聊 */
+async function loadScenes(): Promise<void> {
+  try {
+    scenes.value = await listAllScenes();
+  } catch {
+    scenes.value = [];
   }
 }
 
@@ -341,6 +389,7 @@ async function remove(id: string): Promise<void> {
 
 onMounted(() => {
   void load();
+  void loadScenes();
 });
 </script>
 
@@ -594,6 +643,114 @@ onMounted(() => {
 .conv__legacy-btn:hover {
   border-color: var(--border-strong);
   color: var(--accent);
+}
+
+/* 场景列表：世界模式的入口。比旧对话列表更显眼 —— 它才是现在的主线 */
+.scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--bg-soft), var(--bg));
+}
+
+.scenes__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.scenes__title {
+  font-size: 14px;
+}
+
+.scenes__hint {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.scene-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+  list-style: none;
+}
+
+.scene-item {
+  display: flex;
+  padding: 8px 10px;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.scene-item:hover {
+  background: var(--bg-elevated);
+  text-decoration: none;
+}
+
+.scene-item__badge {
+  flex-shrink: 0;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 18px;
+}
+
+/* 私聊用琥珀色：一眼分得清「当众」和「只有你们」 */
+.scene-item__badge--private {
+  border-color: rgba(224, 167, 94, 0.45);
+  color: var(--accent);
+}
+
+.scene-item__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scene-item__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scene-item__name {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scene-item__time {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.scene-item__preview {
+  overflow: hidden;
+  flex: 1;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-item__people {
+  color: var(--accent);
+  font-size: 11px;
+  opacity: 0.85;
 }
 
 .picker__item--check {

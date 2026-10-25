@@ -1,9 +1,10 @@
 <template>
   <section class="scene">
     <header class="scene__head">
-      <!-- 私聊场景：回去要把人一起带回去，所以不是普通链接而是动作 -->
+      <!-- 私聊场景：回去要把人一起带回去，所以不是普通链接而是动作。
+           迁移过来的旧私聊没有来源场景，回不去，就退回普通入口。 -->
       <button
-        v-if="isPrivate"
+        v-if="isPrivate && scene?.sourceSceneId"
         class="scene__back scene__back--action"
         type="button"
         :disabled="leaving"

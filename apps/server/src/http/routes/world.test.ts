@@ -668,6 +668,31 @@ describe('私密场景', () => {
   });
 });
 
+describe('场景列表（对话页的入口）', () => {
+  it('列出所有场景：存档名、在场者、消息数、最后一句', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const patrol = await seedCharacter(app, '夜巡人');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss, patrol]);
+      await speak(app, sceneId, '来一杯。');
+
+      const response = await app.inject({ method: 'GET', url: '/api/world/scenes' });
+      expect(response.statusCode).toBe(200);
+      const scenes = response.json().data;
+      expect(scenes).toHaveLength(1);
+      expect(scenes[0]).toMatchObject({
+        id: sceneId,
+        saveName: '月灯镇',
+        kind: 'public',
+        presentCount: 2,
+        messageCount: 2,
+      });
+      expect(scenes[0].presentNames).toEqual(['月灯老板', '夜巡人']);
+      expect(String(scenes[0].preview)).toContain('接话');
+    });
+  });
+});
+
 describe('好感度', () => {
   it('每轮结束打一次分，并把变化写进库', async () => {
     await withApp(async ({ app, scoreCalls }) => {

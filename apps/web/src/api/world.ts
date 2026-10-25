@@ -11,6 +11,7 @@ import type {
 } from '@tavern/shared';
 import {
   WORLD_SAVES_ENDPOINT,
+  WORLD_SCENES_ENDPOINT,
   worldSaveAffinityEndpoint,
   worldSaveJournalEndpoint,
   worldSaveScenesEndpoint,
@@ -35,8 +36,22 @@ export interface SceneSummary extends Scene {
   present: { id: string; name: string; busyWith: string | null }[];
 }
 
+/** 全世界的场景（"对话"页的入口）：带上存档名、在场者、消息数与最后一句。 */
+export interface SceneListItem extends Scene {
+  saveName: string;
+  presentCount: number;
+  presentNames: string[];
+  messageCount: number;
+  preview: string;
+}
+
 export function listSaves(): Promise<Save[]> {
   return apiGet<Save[]>(WORLD_SAVES_ENDPOINT, { timeoutMs: 10_000 });
+}
+
+/** 所有场景（不分存档），按最近有动静排。 */
+export function listAllScenes(): Promise<SceneListItem[]> {
+  return apiGet<SceneListItem[]>(WORLD_SCENES_ENDPOINT, { timeoutMs: 15_000 });
 }
 
 export function listScenes(saveId: string): Promise<SceneSummary[]> {

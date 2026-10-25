@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -414,6 +415,135 @@ export const MIGRATIONS: readonly Migration[] = [
         )
       `);
       db.exec('CREATE INDEX idx_clues_save ON clues (save_id, known_at)');
+    },
+  },
+  {
+    version: 15,
+    name: 'migrate-legacy-conversations-to-scenes',
+    up: (db) => {
+      /**
+       * 把「按角色开的旧对话」搬进世界模式：每条旧会话变成一个场景。
+       *
+       * 消息一条都不动 —— 只把 conversations.scene_id 指向新场景，
+       * 于是旧内容在场景页里原样读得出来（resolveThread 走的是同一条链）。
+       *
+       * 两个判断：
+       *   1. 只有真·一对一的旧对话才做成 private（「私聊 · 只有你们」）；
+       *      酒馆大厅那种多人在场的，做成 public —— 把三个人塞进「只有你们两个人」
+       *      的场景里，界面上就是在说假话。
+       *   2. 没有存档就先建一个：场景必须挂在存档下，不能凭空飘着。
+       */
+      const legacy = db
+        .prepare(
+          'SELECT id, character_id, title, hall_members FROM conversations WHERE scene_id IS NULL',
+        )
+        .all() as unknown as {
+        id: string;
+        character_id: string;
+        title: string;
+        hall_members: string | null;
+      }[];
+      if (legacy.length === 0) return;
+
+      const at = new Date().toISOString();
+      let saveRow = db.prepare('SELECT id FROM saves ORDER BY created_at ASC LIMIT 1').get() as
+        { id: string } | undefined;
+      if (!saveRow) {
+        const saveId = randomUUID();
+        db.prepare(
+          'INSERT INTO saves (id, name, chapter, created_at, updated_at) VALUES (?, ?, 1, ?, ?)',
+        ).run(saveId, '月灯镇', at, at);
+        saveRow = { id: saveId };
+      }
+      const saveId = saveRow.id;
+
+      const parseMembers = (raw: string | null): string[] => {
+        try {
+          const parsed: unknown = JSON.parse(raw ?? '[]');
+          if (!Array.isArray(parsed)) return [];
+          return parsed
+            .map((item) =>
+              typeof item === 'object' && item !== null ? (item as { id?: unknown }).id : undefined,
+            )
+            .filter((id): id is string => typeof id === 'string');
+        } catch {
+          return [];
+        }
+      };
+
+      const characterName = (id: string): string => {
+        const row = db.prepare('SELECT name FROM characters WHERE id = ?').get(id) as
+          { name?: string } | undefined;
+        return row?.name ?? '某人';
+      };
+
+      for (const conversation of legacy) {
+        const hallMembers = parseMembers(conversation.hall_members).filter(
+          (id) => id !== conversation.character_id,
+        );
+        const memberIds = [conversation.character_id, ...hallMembers].filter(
+          (id, index, list) => list.indexOf(id) === index,
+        );
+        const isHall = memberIds.length > 1;
+        const sceneId = randomUUID();
+        const name =
+          conversation.title.trim() ||
+          `${characterName(conversation.character_id)}${isHall ? '的场景' : '的私聊'}`;
+
+        db.prepare(
+          `INSERT INTO scenes (id, save_id, name, kind, closeness, source_scene_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+        ).run(sceneId, saveId, name, isHall ? 'public' : 'private', isHall ? 0.35 : 0.7, at, at);
+
+        for (const characterId of memberIds) {
+          db.prepare(
+            `INSERT OR IGNORE INTO presence
+               (scene_id, character_id, entered_turn, left_turn, busy_with, reason)
+             VALUES (?, ?, 1, NULL, NULL, NULL)`,
+          ).run(sceneId, characterId);
+        }
+
+        db.prepare('UPDATE conversations SET scene_id = ? WHERE id = ?').run(
+          sceneId,
+          conversation.id,
+        );
+      }
+    },
+  },
+  {
+    version: 16,
+    name: 'repair-broken-message-chains',
+    up: (db) => {
+      /**
+       * 把「断掉的链」接上。
+       *
+       * 早期的场景对话接口没给每条用户消息挂 parent_id，于是每轮各自成一条根链 ——
+       * 从当前叶子回溯只看得到最后一轮，前面说过的话等于没了（第 2 步修的是不再产生
+       * 新断链，已有数据得在这里补）。
+       *
+       * 规则：只有会话里的第一条消息可以没有父，其余没有父的都是漏挂，
+       * 补成「同一会话里时间上紧挨着的前一条」。
+       */
+      db.exec(`
+        UPDATE messages
+        SET parent_id = (
+          SELECT prev.id
+          FROM messages AS prev
+          WHERE prev.conversation_id = messages.conversation_id
+            AND (prev.created_at < messages.created_at
+                 OR (prev.created_at = messages.created_at AND prev.rowid < messages.rowid))
+          ORDER BY prev.created_at DESC, prev.rowid DESC
+          LIMIT 1
+        )
+        WHERE parent_id IS NULL
+          AND conversation_id IN (SELECT id FROM conversations WHERE scene_id IS NOT NULL)
+          AND EXISTS (
+            SELECT 1 FROM messages AS prev
+            WHERE prev.conversation_id = messages.conversation_id
+              AND (prev.created_at < messages.created_at
+                   OR (prev.created_at = messages.created_at AND prev.rowid < messages.rowid))
+          )
+      `);
     },
   },
 ];

@@ -8,7 +8,8 @@
 本地 AI 角色扮演酒馆：Vue3 前端 + Fastify/SQLite 后端，pnpm monorepo。
 仓库 `C:\Users\jingy\Desktop\vork01`，远端 `github.com/yaya358/cangku01`（main）。
 
-**当前状态**：57 个提交 / 357 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
+**当前状态**：58 个提交 / 363 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
+**世界模式六步已全部实现**（第 6 步见下方「迁移」），下面是收尾与新会话该知道的事。
 
 ```bash
 pnpm install && pnpm dev     # 后端 8787 + 前端 5173
@@ -34,7 +35,7 @@ pnpm -r run typecheck && pnpm lint
 | 3 | 私聊场景 + 低声 + 偷听 | ✅ 已完成（`core/world/eavesdrop.ts`、`whisper.ts`、场景私聊接口） |
 | 4 | 好感度打分 + 阈值解锁 | ✅ 已完成（`core/world/affinity.ts`、`scoring.ts`、关系条） |
 | 5 | 主线章节 + 情报本侧栏 | ✅ 已完成（`core/world/journal.ts`、三栏布局、情报本） |
-| 6 | 旧会话迁移成私密场景 | ⬜ **接下来做这个** |
+| 6 | 旧会话迁移成私密场景 | ✅ 已完成（迁移 15 + 16，对话页「场景」区） |
 
 ### 第 2 步：前端场景视图（已完成，要点留着备查）
 
@@ -104,9 +105,27 @@ pnpm -r run typecheck && pnpm lint
 - 界面：三栏（190px 主线 | 现场 | 232px 情报本 + 好感）。情报可点开看原话；
   好感条带 20/60 刻度。窄屏（<1000px）侧栏落到上下。
 
-### 第 6 步：迁移
+### 第 6 步：迁移（已完成，要点留着备查）
 
-- 每条旧 `conversations` → 一个 `kind='private'` 的 scene，消息不动（`scene_id` 回填）
+- **迁移 15**：每条 `scene_id IS NULL` 的旧会话变成一个场景 —— 一对一的做成 `private`，
+  酒馆大厅那种多人的做成 `public`（把人塞进「只有你们两个人」的私聊里，界面就是在说假话）。
+  人补进 `presence`，`conversations.scene_id` 回填，消息一条不动。没有存档就先建一个。
+- **迁移 16**：修早期断掉的 `parent_id` 链。第 1 步的接口没给用户消息挂 parent，
+  每轮各自成根链 → 从叶子回溯只看得到最后一轮。规则：只有会话第一条可以没有父，
+  其余补成「同会话里时间上紧挨着的前一条」。真机上它让酒馆场景从 34 条变回 36 条。
+- 入口：`GET /api/world/scenes`（全世界的场景，带存档名/在场者/消息数/最后一句），
+  对话页多一块「场景」区 —— 迁移过来的旧对话就在这里，不藏在库里。
+- 迁移过来的私聊没有 `sourceSceneId`，所以场景页的返回按钮退回普通「← 对话」
+  （否则会去调 `/return` 然后报错）。
+
+### 还没做的（下一轮可以挑）
+
+- 「新对话」（按角色开局）还是老的会话模式：不经过在场/好感/主线。要么废掉它，
+  要么改成「挑一个角色 → 开一个 private 场景」。
+- 旧版酒馆大厅入口仍是兼容态，可以下线。
+- 情报目前只从「好感跨 60」来；设计里的 beats/cue 条件（`clue_needed`、`presence_change`）
+  还没做，需要更多剧情时再上。
+- 换场景仍然不花轮次（只有见/不见的记录），「传送要花一轮」还没实现。
 
 ## 四、已知的坑（都踩过，别再踩）
 
@@ -132,6 +151,11 @@ pnpm -r run typecheck && pnpm lint
 15. **PowerShell 的 `Get-Content` / `Set-Content` 会毁掉中文**（第 3 条那个坑真的踩了）：
     这台机器上的 `pwsh` 其实是 Windows PowerShell 5.1，默认按 GBK 读文件，
     反向修复也救不回来（非法字节已经变成 `?`）。批量改文本用 `edit` 工具或 node 脚本。
+16. **已经在本机跑过的迁移不要再改**（第 8 条的实际后果）：本机 `data/tavern.db` 的
+    `user_version` 一旦前进，改旧迁移对它无效，只能再加一版。想在本机验证「新加的迁移步骤」，
+    就老老实实开新版本号（第 6 步的 15/16 就是这么拆的）。
+17. **测数据迁移的办法**：`runMigrations(db, MIGRATIONS.filter(m => m.version <= N))` 先把库
+    停在旧版本，造好旧数据，再 `runMigrations(db)` 跑完整迁移 —— `migrations.test.ts` 里有现成例子。
 
 ## 五、风格约束
 

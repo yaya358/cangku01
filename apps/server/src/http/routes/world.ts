@@ -127,6 +127,38 @@ export function registerWorldRoutes(app: AppInstance): void {
     return success(request.id, app.world().listSaves());
   });
 
+  /**
+   * 全世界的场景列表（"对话"页的入口）。
+   *
+   * 带上是哪个存档、此刻谁在、有几句、最后一句是什么 —— 迁移过来的旧对话
+   * 现在也是场景，得让它们在这张表里找得到，否则老内容等于被藏起来了。
+   */
+  app.get(WORLD_SCENES_ENDPOINT, async (request) => {
+    const scenes = [];
+    for (const save of app.world().listSaves()) {
+      for (const scene of app.world().listScenes(save.id)) {
+        const conversation = app.conversations().findByScene(scene.id);
+        const messages = conversation ? app.messages().listByConversation(conversation.id) : [];
+        const present = describePresent(scene.id);
+        const last = messages.at(-1);
+
+        scenes.push({
+          ...scene,
+          saveName: save.name,
+          presentCount: present.length,
+          presentNames: present.map((person) => person.name),
+          messageCount: messages.length,
+          preview: (last?.content ?? '').replace(/\s+/g, ' ').slice(0, 60),
+          updatedAt: conversation?.updatedAt ?? scene.updatedAt,
+        });
+      }
+    }
+
+    // 最近有过动静的场景排前面：它不是收藏夹，是「这几天你在哪儿」
+    scenes.sort((left, right) => (left.updatedAt < right.updatedAt ? 1 : -1));
+    return success(request.id, scenes);
+  });
+
   /** 某存档下的场景（含在场者名字，前端直接渲染头像条）。 */
   app.get(`${WORLD_SAVES_ENDPOINT}/:id/scenes`, async (request) => {
     const { id } = request.params as { id: string };
