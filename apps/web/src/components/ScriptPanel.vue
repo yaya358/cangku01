@@ -7,9 +7,23 @@
           <span class="script__count">{{ events.length }} 幕</span>
         </h2>
         <p class="script__hint">
-          按轮次推进的小剧本：第 3 轮有人推门进来，第 6 轮掏出一张通缉令。 最后一幕就是本章结局 ——
-          演完这一场就结束了。
+          按轮次推进的小剧本：第 3 轮有人推门进来，第 6 轮掏出一张通缉令。 标了「结局」的那一幕演完，
+          这一场就结束。
         </p>
+      </div>
+
+      <div class="script__tools">
+        <n-button size="tiny" :disabled="events.length === 0 || busy" @click="doExport">
+          导出剧本
+        </n-button>
+        <n-button size="tiny" :loading="busy" @click="pickImport">导入剧本</n-button>
+        <input
+          ref="importInputRef"
+          type="file"
+          accept="application/json,.json"
+          hidden
+          @change="onImportPicked"
+        />
       </div>
     </header>
 
@@ -108,6 +122,8 @@ import { onMounted, ref, watch } from 'vue';
 import {
   createScriptEvent,
   deleteScriptEvent,
+  exportScript,
+  importScript,
   listScriptEvents,
   updateScriptEvent,
 } from '@/api/script';
@@ -118,6 +134,9 @@ const events = ref<ScriptEvent[]>([]);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref<string | null>(null);
+/** 导出/导入进行中 */
+const busy = ref(false);
+const importInputRef = ref<HTMLInputElement | null>(null);
 
 const editingId = ref<string | null>(null);
 const draftTurn = ref(3);
@@ -211,6 +230,59 @@ async function remove(event: ScriptEvent): Promise<void> {
   }
 }
 
+/** 导出成 JSON 文件（浏览器里自己下载，不经后端中转）。 */
+async function doExport(): Promise<void> {
+  busy.value = true;
+  error.value = null;
+  try {
+    const { filename, bundle } = await exportScript(props.characterId);
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function pickImport(): void {
+  importInputRef.value?.click();
+}
+
+/** 导入：接受 {events:[...]} 或直接的数组，宽松一点更好用。 */
+async function onImportPicked(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+
+  busy.value = true;
+  error.value = null;
+  try {
+    const parsed: unknown = JSON.parse(await file.text());
+    const list = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { events?: unknown[] })?.events ?? null;
+    if (!Array.isArray(list) || list.length === 0) {
+      error.value = '这个文件里没有剧本（需要 events 数组）';
+      return;
+    }
+    const result = await importScript(props.characterId, list as Record<string, unknown>[]);
+    await load();
+    error.value = null;
+    alert(`已导入 ${result.imported} 幕`);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = false;
+  }
+}
+
 watch(
   () => props.characterId,
   () => {
@@ -252,12 +324,17 @@ onMounted(() => {
   font-size: 11px;
 }
 
-.script__hint {
-  max-width: 620px;
-  margin-top: 6px;
-  color: var(--text-faint);
-  font-size: 11.5px;
-  line-height: 1.7;
+.script__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.script__tools {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
 }
 
 .script__loading,

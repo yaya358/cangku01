@@ -229,3 +229,43 @@ provider 扩展接口 → OpenAI 兼容实现（含 SSE 流式）→ baseURL / �
 
 扩展点体系的接口（`core/extension`）、配置段的扩展方式（`config/schema.ts`）、
 契约的共享方式（`packages/shared`）都已就位，不需要再动核心代码。
+
+---
+
+## 七、后续阶段的模块（阶段 4-6）
+
+### 上下文引擎（core/context）
+
+一切皆「层」（ContextLayer），每层带 kind、优先级、token 数、是否可裁剪：
+
+```n
+system → user_persona(730) → persona(700) → motive(680) → scenario(650) → fact(685)
+
+       → event(690) → worldbook(600) → summary(500) → history(300×n) → post_history(800) → user_input(1000)
+
+```
+
+- 拼装时按 token 预算裁剪：先丢最早历史，再按优先级丢整层；cuttings 会记进 budget.dropped
+- token 用估算（CJK 1 字 1 token，ASCII 4 字符 1 token，向上取整），不引 tiktoken
+- 组装结果连同「每层为什么进来」一起返回，供 /api/context/preview 逐层展示
+
+### 世界书（core/worldbook）
+
+- 关键词命中才注入；支持次要关键词（主次同时命中）与递归链式触发
+- 三重闸门：maxPasses(3) / maxEntries(8) / alreadyTriggered，A→B→A 有专门用例
+
+### 对话树（core/chat/thread.ts）
+
+- 消息用 parent_id 组成树；上下文只取「根 → activeLeafId」这一条路径
+- resolveThread / listLeaves / summarizeBranches / childrenOf 四个纯函数，对环与悬空 parent 有防御
+
+### 剧本引擎（core/script）
+
+- 事件按轮次触发；可选择条件关键词与结局标记
+- 触发后把 sets 写入 conversation_facts，之后每轮作为 fact 层注入且要求「不可否认」
+
+### 示例播种（core/samples）
+
+- 空库首次启动写入 8 个示例角色 + 头像 + 小剧本；按卡片真名去重，幂等
+- 可通过 POST /api/admin/seed 手动重放
+

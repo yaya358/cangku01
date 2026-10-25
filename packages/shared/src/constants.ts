@@ -120,3 +120,13 @@ export const SCRIPT_EVENT_ENDPOINT = `${API_PREFIX}/script-events`;
 export function scriptEventEndpoint(id: string): string {
   return `${SCRIPT_EVENT_ENDPOINT}/${encodeURIComponent(id)}`;
 }
+
+/** 导出某角色的整份剧本（JSON）。 */
+export function scriptExportEndpoint(characterId: string): string {
+  return `${SCRIPT_EVENT_ENDPOINT}/by-character/${encodeURIComponent(characterId)}/export`;
+}
+
+/** 导入一份剧本到某角色。 */
+export function scriptImportEndpoint(characterId: string): string {
+  return `${SCRIPT_EVENT_ENDPOINT}/by-character/${encodeURIComponent(characterId)}/import`;
+}

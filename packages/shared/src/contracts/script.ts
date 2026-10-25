@@ -63,3 +63,24 @@ export const ConversationFactSchema = z.object({
   createdAt: z.string(),
 });
 export type ConversationFact = z.infer<typeof ConversationFactSchema>;
+
+/**
+ * 一份可分享的剧本。
+ *
+ * 导出它就能把整场戏发给别人，导入后一幕不差地重演 ——
+ * 「人人能写戏」的最后一步就是把剧本变成可流通的文件。
+ */
+export const ScriptBundleSchema = z.object({
+  /** 文件格式版本，将来改结构时好判断 */
+  format: z.literal('tavern-ai-script'),
+  version: z.literal(1),
+  characterName: z.string().default(''),
+  events: z.array(ScriptEventInputSchema).min(1).max(50),
+});
+export type ScriptBundle = z.infer<typeof ScriptBundleSchema>;
+
+/** 不带 format 版本的宽松输入：允许用户手写只有 events 的文件。 */
+export const ScriptImportSchema = z.object({
+  events: z.array(ScriptEventInputSchema).min(1).max(50),
+});
+export type ScriptImport = z.infer<typeof ScriptImportSchema>;

@@ -1,152 +1,28 @@
-# 酒馆 AI（Tavern AI）
+﻿# 酒馆 AI · Tavern AI
 
-本地优先的 AI 角色扮演酒馆：角色卡、世界书、分支对话、流式输出，会话数据全部留在自己机器上。
-浏览器打开地址即用，不需要装客户端。
+> 本地优先的 AI 角色扮演酒馆。角色卡导入导出、世界书按需注入、上下文分层组装、
+> 重说与对话树分支、角色有秘密有目的、玩家有身份有目标、剧情按轮次自动推进。
 
-**技术栈**：Vue3 + Vite + Pinia + Naive UI ｜ Fastify + TypeScript ｜ pnpm workspace 单仓
+前端 **Vue 3 + Vite**（浏览器渲染），后端 **Node + Fastify + TypeScript + SQLite**，
+pnpm workspace 单仓管理。后端业务代码 **7800+ 行**，测试 **267 个**。
 
-![概览页](docs/assets/home.png)
-
----
-
-## 当前进度
-
-### 阶段 1「基建」✅ 已完成
-
-| 能力 | 状态 | 说明 |
-|---|---|---|
-| pnpm 单仓（server / web / shared） | ✅ | 共享契约走 `packages/shared`，前后端同一份类型 |
-| 后端骨架与统一响应信封 | ✅ | 全局错误处理、traceId、分层目录 |
-| `/api/health` 自检接口 | ✅ | 配置来源、内存、扩展点统计，单项失败不拖垮整体 |
-| 扩展点注册表 | ✅ | 五类扩展、priority 排序、失败隔离、逆序释放 |
-| 分层配置（yaml + env + zod） | ✅ | 合并顺序可追踪，写错字段启动即报错 |
-| 前端骨架与联调 | ✅ | 深色酒馆风、健康状态卡片、自动刷新、404 兜底 |
-| 生产单端口托管前端 | ✅ | `pnpm build && pnpm start` 后只在 8787 开整站 |
-
-### 阶段 2「模型接入层」✅ 已完成
-
-| 能力 | 状态 | 说明 |
-|---|---|---|
-| provider 适配器接口 | ✅ | chat / stream 双通道，能力位声明，与扩展点共用生命周期 |
-| OpenAI 兼容实现 | ✅ | OpenAI、DeepSeek、中转站、本地 Ollama 走同一套协议 |
-| SSE 流式解析 | ✅ | 逐行状态机处理分片、多事件、CRLF、心跳与中文切字节 |
-| 首字超时与取消 | ✅ | 30 秒无首字判卡死；用户点停止立刻中断上游 |
-| 配置化注册 | ✅ | `providers` 段声明即可，密钥支持 `apiKeyEnv` 从环境读 |
-| 错误归一层 | ✅ | 401/404/429/5xx 映射成带语义错误码，可重试标记 |
-| 试话面板 | ✅ | 浏览器里逐字输出，实时显示首字延迟 / 总耗时 / token |
-
-![试话面板](docs/assets/playground.png)
-
-后续阶段（角色卡、上下文引擎、分支聊天、记忆与群聊、导入导出）见 [docs/git-workflow.md](docs/git-workflow.md) 的提交计划。
+![角色墙](docs/assets/characters.png)
 
 ---
 
 ## 快速开始
 
-**前置要求**：Node.js ≥ 20.10、pnpm ≥ 9。
-
 ```bash
-pnpm install          # 装依赖（shared 会自动编译一次）
-pnpm dev              # 同时起后端 8787 与前端 5173
+pnpm install
+cp config/user.example.yaml config/user.yaml   # 填入你的模型 key
+pnpm dev
 ```
 
-然后浏览器打开 **http://127.0.0.1:5173** —— 页面上的状态卡会实时显示后端健康情况。
+打开 **http://127.0.0.1:5173** —— 首次启动会自动写入 8 个带头像的示例角色。
 
-也可以只起其中一端：
+### 配置模型
 
-```bash
-pnpm dev:server       # 只有后端，直接访问 http://127.0.0.1:8787/api/health
-pnpm dev:web          # 只有前端（需要后端已在跑，否则状态卡显示「未连接」并给出排查建议）
-```
-
-### 生产形态（单端口）
-
-```bash
-pnpm build            # 依次构建 shared → server → web
-pnpm start            # 后端托管 apps/web/dist
-```
-
-打开 **http://127.0.0.1:8787** 就是完整页面，不再需要 5173。
-`/api/*` 未命中返回 JSON 404，其余路径回落到 `index.html` 交给 Vue Router（前端路由刷新不会白屏）。
-
----
-
-## 常用命令
-
-| 命令 | 作用 |
-|---|---|
-| `pnpm dev` | 并行启动后端 + 前端（含 shared 监听编译） |
-| `pnpm dev:server` / `pnpm dev:web` | 单独启动某一端 |
-| `pnpm build` | 构建全部包（拓扑顺序） |
-| `pnpm start` | 以生产模式启动后端（需先 build） |
-| `pnpm lint` / `pnpm lint:fix` | ESLint 检查 / 自动修复 |
-| `pnpm format` / `pnpm format:check` | Prettier 格式化 / 校验 |
-| `pnpm typecheck` | 全仓类型检查（后端 tsc，前端 vue-tsc） |
-| `pnpm test` | 全部单元/集成测试 |
-
----
-
-## 目录结构
-
-```
-.
-├── apps/
-│   ├── server/                  # 后端：Fastify + TypeScript
-│   │   └── src/
-│   │       ├── app.ts           # 组装应用（不 listen，便于 inject 测试）
-│   │       ├── index.ts         # 入口：加载配置 → 建应用 → 监听 → 优雅退出
-│   │       ├── config/          # schema（zod）+ loader（yaml/env 合并）
-│   │       ├── core/extension/  # 扩展点类型、注册表、错误
-│   │       ├── http/            # 信封、错误映射、路由、静态托管
-│   │       ├── lib/             # 日志、运行时信息
-│   │       └── types/           # Fastify 实例类型与 decorate 声明
-│   └── web/                     # 前端：Vue3 + Vite
-│       └── src/
-│           ├── api/             # HTTP 客户端（超时 / 拆信封 / 错误归一）
-│           ├── stores/          # Pinia：健康状态 + 自动刷新
-│           ├── router/          # 路由与 404 兜底
-│           ├── views/           # 页面
-│           ├── styles/          # 主题变量与全局样式
-│           └── utils/           # 格式化工具
-├── packages/
-│   └── shared/                  # 前后端共享契约（zod schema + 类型 + 常量）
-├── config/
-│   ├── default.yaml             # 出厂配置（随代码提交）
-│   └── user.example.yaml        # 个人配置模板 → 复制为 user.yaml（已 gitignore）
-└── docs/                        # 架构说明、提交规范、截图
-```
-
----
-
-## 配置
-
-三层合并，**后者覆盖前者**：
-
-```
-内置默认值（schema） → config/default.yaml → config/user.yaml → 环境变量
-```
-
-- 个人改动写 `config/user.yaml`（已被 `.gitignore` 忽略，可以放 API Key）：
-
-  ```bash
-  cp config/user.example.yaml config/user.yaml     # Windows: Copy-Item
-  ```
-
-- 环境变量按「前缀 + 双下划线」映射到配置路径：
-
-  ```bash
-  TAVERN_SERVER__PORT=9000        # server.port
-  TAVERN_LOGGING__LEVEL=debug     # logging.level
-  TAVERN_FEATURES__PLUGINS=true   # features.plugins
-  PORT=9000                       # 兼容 PaaS 惯例，等价于 server.port
-  NODE_ENV=production             # 等价于 app.env
-  ```
-
-- 配置写错（字段拼错、类型不对、YAML 语法错）会**在启动第一秒**打印具体文件与字段，并以退出码 1 结束，不会等到运行时才炸。
-
-### 接一个模型服务
-
-在 `config/user.yaml` 里加一段（DeepSeek 为例，真实模型 id 是 `deepseek-flash`）：
+`config/user.yaml`（**已被 gitignore，不会进仓库**）：
 
 ```yaml
 providers:
@@ -154,85 +30,158 @@ providers:
     type: openai-compatible
     baseUrl: https://api.deepseek.com/v1
     model: deepseek-flash
-    apiKey: sk-xxxxxxxx          # 本文件不入库
-    # 更稳妥：删掉 apiKey，改用 apiKeyEnv: DEEPSEEK_API_KEY
+    apiKey: sk-你的key
     priority: 10
 ```
 
-重启后端，打开 `/playground` 就能对话。注意：`providers` 里任意一家 OpenAI 兼容服务都行（OpenAI 官方、通义、Moonshot、本地 Ollama 的 `/v1`、各类中转站）。
-
-字段含义见 [config/default.yaml](config/default.yaml)，权威定义见 `apps/server/src/config/schema.ts`。
+任何 **OpenAI 兼容**接口都能用（DeepSeek / OpenAI / Ollama / vLLM / 本地网关）。
+环境变量可覆盖任意配置：`TAVERN_SERVER__PORT=9000`。
 
 ---
 
-## 接口
+## 功能
 
-所有响应统一包裹信封；失败时 `ok: false`，`error.code` 是稳定可编程的错误码（`NOT_FOUND`、`VALIDATION_FAILED`、`UPSTREAM_ERROR`…），`error.message` 面向用户。
+### 1. 角色卡
 
-### `GET /api/health` —— 自检
+| 能力 | 说明 |
+|---|---|
+| 导入 PNG 角色卡 | 解析 PNG 的 `tEXt`/`zTXt`/`iTXt` 块里的 base64 卡片数据 |
+| 兼容规范 | V1 扁平卡、V2 / V3（`chara_card_v2` / `chara_card_v3`） |
+| 导入 JSON 卡 | 与 PNG 同一套归一化逻辑，缺字段补空、超长截断 |
+| 导出 PNG / JSON | 导出 PNG 先剥旧卡块再嵌新卡，避免"导出后再导入拿到旧设定" |
+| 新建 / 编辑 / 删除 | 手填表单；头像可单独上传（PNG / JPEG / WebP，浏览器端转码成 PNG） |
+| 内置示例角色 | 8 个原创角色（含头像与小剧本），空库首次启动自动写入 |
 
-```jsonc
-{
-  "ok": true,
-  "traceId": "c43567a7-…",          // 与日志中的 reqId 一致
-  "data": {
-    "status": "ok",                  // ok | degraded
-    "app": { "name": "酒馆 AI", "version": "0.1.0", "env": "development", "uptimeSeconds": 12.5, … },
-    "server": { "host": "127.0.0.1", "port": 8787, "pid": 1234, "memoryMb": 168.7 },
-    "extensions": { "total": 0, "ready": 0, "failed": 0, "pending": 0 },
-    "checks": [ { "name": "config", "status": "ok", "message": "1 个配置文件 · development", "latencyMs": 0.25 } ]
-  }
-}
+### 2. 世界书（按需注入的世界设定）
+
+- 关键词命中才注入：省 token，也避免无关设定把对话带偏
+- **次要关键词**：主次同时命中才触发，降低误触发
+- **递归链式触发**：条目内容提到别的关键词会继续触发
+- 三重防失控：轮次上限、条数上限、已触发集合（`A→B→A` 有专门用例）
+- **常驻条目**（不看关键词每轮注入）与优先级（条数吃满时留高优先级）
+- 归属：仅本角色 / 全局共享
+- 完整管理界面：新增、编辑、启停、删除
+
+### 3. 上下文引擎
+
+一次请求由这些层拼成，每层带 token 数与优先级，可被预算裁剪：
+
+```
+system → 玩家身份 → 人设 → 秘密与目的 → 场景 → 剧情事实 → 剧本事件 → 世界书 → 摘要 → 历史 → 后置指令 → 本轮输入
 ```
 
-### `GET /api/providers` —— 模型服务列表
+- **token 估算**：CJK 按 1 字 1 token、ASCII 按 4 字符 1 token，向上取整
+- **预算裁剪**：超预算先丢最早的历史，再按优先级丢低价值层；被裁掉的层在预览里可见
+- **上下文预览接口**：不调模型，逐层展示"这一轮到底发了什么"（含命中原因与被裁内容）
 
-```jsonc
-{ "ok": true, "data": [
-  { "name": "deepseek", "model": "deepseek-flash", "state": "ready",
-    "capabilities": ["streaming", "usage"], "hasCredentials": true }
-]}
+### 4. 聊天
+
+- 流式输出（SSE），首字延迟与总耗时都记进数据库
+- **每轮落库**：刷新记录还在；历史从库里重建，不信任前端传的 messages
+- **重说**：让模型换个说法重生成，旧版保留为候选，`‹ 1/2 ›` 来回切换
+- **对话树分支**：从任意一句开新时间线，两支互不污染
+- 编辑、删除单条消息；Enter 发送 / Shift+Enter 换行
+
+### 5. 角色有戏
+
+| 机制 | 作用 |
+|---|---|
+| **秘密** | 心里知道但绝不主动说；被追问时才用回避、反问挡一挡 |
+| **目的** | 想从你这得到什么 —— 决定它主动试探、提条件，而不是问一句答一句 |
+| **玩家身份** | 你是谁、图什么；决定它该戒备、讨好还是试探（不再对"陌生人"客套） |
+
+### 6. 剧本模式
+
+一个角色的「小剧本」= 若干条按轮次触发的事件：
+
+| 能力 | 说明 |
+|---|---|
+| 轮次触发 | 第 3 轮有人推门进来，第 6 轮掏出一张通缉令 |
+| **条件触发** | 那一幕可写关键词：玩家说到才会发生 |
+| **多结局** | 标了「结局」的那一幕演完，这一场就结束；几条线的最后一幕都标上即多结局 |
+| **剧情状态** | 那一幕可写「触发后记住什么」，写成事实后每轮注入且不可否认 |
+| 进度可见 | 聊天页顶部显示「第 3 轮 · 剧本 1/3 幕 · 下一幕第 6 轮」 |
+| 导出 / 导入 | 整份剧本可导出 JSON 发给别人，导入后一幕不差地重演 |
+
+---
+
+## 技术架构
+
+```
+apps/server            Fastify + TS + node:sqlite（后端业务代码 7800+ 行）
+  core/extension       扩展注册表：provider / storage / route / context / integration
+  core/provider        OpenAI 兼容适配器（手写 SSE 解析、首字超时、用量统计）
+  core/storage         SQLite + PRAGMA user_version 迁移（8 版）
+  core/character       角色卡解析/导出、PNG 块读写、头像存储
+  core/worldbook       关键词触发与递归扫描
+  core/context         分层组装、token 预算、裁剪策略
+  core/chat            会话/消息仓储、对话树解析
+  core/script          剧本事件、条件触发、剧情事实
+  core/samples         内置示例角色播种
+  http/routes          health / characters / chat / context / conversations / worldbook / script / admin
+apps/web               Vue 3 + Vite + Pinia + Vue Router + Naive UI
+packages/shared        zod 契约、常量、示例数据（前后端共用）
 ```
 
-### `POST /api/chat` —— 一次性对话
+**关键设计**
+
+- **契约先行**：所有请求/响应都是 `@tavern/shared` 里的 zod schema，前后端同源，改一处两端报红
+- **分层上下文**：一切皆层，带优先级可裁剪；「为什么这么组装」随结果一起返回
+- **数据库是唯一事实源**：上下文从库里重建，不信任前端传来的历史
+- **统一封装**：`{ ok, traceId, data | error }`；`AppError`（HTTP 语义）与 `ProviderError`（上游语义）分离
+- **可测性**：267 个用例覆盖卡片解析、SSE 分帧、预算裁剪、对话树、触发判定；路由用 `app.inject()`
+
+详细设计见 [docs/architecture.md](docs/architecture.md)，提交规范见 [docs/git-workflow.md](docs/git-workflow.md)。
+
+---
+
+## 常用命令
 
 ```bash
-curl -X POST http://127.0.0.1:8787/api/chat \
-  -H 'content-type: application/json' \
-  -d '{"messages":[{"role":"user","content":"你好"}]}'
+pnpm dev          # 同时起后端(8787)与前端(5173)
+pnpm dev:server   # 只起后端（tsx watch）
+pnpm dev:web      # 只起前端
+pnpm build        # 构建 shared + server + web
+pnpm start        # 生产模式：只开 8787，由后端托管前端产物
+pnpm test         # 跑全部测试
+pnpm typecheck    # 全仓类型检查
+pnpm lint         # ESLint
+pnpm format       # Prettier
 ```
 
-### `POST /api/chat/stream` —— 流式对话（SSE）
-
-请求体同上，响应是 `data: {json}` 帧序列：
-
-```
-data: {"type":"start","traceId":"…","provider":"deepseek","model":"deepseek-flash"}
-data: {"type":"delta","text":"烧"}
-data: {"type":"delta","text":"刀子"}
-data: {"type":"usage","usage":{"promptTokens":45,"completionTokens":119,"totalTokens":164}}
-data: {"type":"done","finishReason":"stop","durationMs":1593,"firstTokenMs":1305,"usage":{…}}
-```
-
-出错时以 `{"type":"error","code":"RATE_LIMITED","message":"…","retryable":true}` 收尾。前端用 `fetch` + `ReadableStream` 读，不用 `EventSource`（它只支持 GET）。
-
----
-
-## 质量门禁
+## Docker
 
 ```bash
-pnpm lint && pnpm typecheck && pnpm test
+docker compose up --build       # 打开 http://127.0.0.1:8787
 ```
 
-当前基线：ESLint 0 error、类型检查 0 error、**87 个用例**全绿（配置 19 / 扩展点 9 / SSE 11 / OpenAI 适配器 19 / provider 工厂 8 / 健康检查 5 / 静态托管 8 / 对话路由 8）。
+镜像内先构建前后端，再由后端单端口托管前端产物；数据库与头像挂在 `./data`。
 
----
+## 数据与目录
 
-## 文档
+```
+data/tavern.db       SQLite 数据库（gitignore）
+data/avatars/        头像文件（gitignore）
+config/default.yaml  默认配置（入库）
+config/user.yaml     本地覆盖，含 key（gitignore）
+```
 
-- [架构说明](docs/architecture.md) —— 分层、请求生命周期、扩展点体系、关键取舍
-- [提交规范](docs/git-workflow.md) —— 提交粒度、信息格式、34 次提交计划
+## 界面
 
-## 说明
+| | |
+|---|---|
+| ![角色详情](docs/assets/character-detail.png) | ![聊天](docs/assets/chat.png) |
+| ![重说](docs/assets/chat-swipe.png) | ![分支](docs/assets/chat-branch.png) |
+| ![上下文预览](docs/assets/context-preview.png) | ![世界书](docs/assets/worldbook.png) |
 
-本项目用于学习与自用。模型服务需要自备 API Key（或本地推理服务），密钥只存在本机 `config/user.yaml`，不会进仓库。
+## 已知限制
+
+- 只有 SQLite 一种存储驱动（`storage.driver: json` 会直接报错，不假装支持）
+- 没有账号体系：接口默认只应监听本机或可信内网；`/api/admin/seed` 无鉴权
+- 条件触发是**关键词近似**，不是完整状态机（判断不了"信任度"这类连续量）
+- 剧本事件只在触发那一刻显示提示卡片，刷新后不展示（数据在库里，未做历史回显）
+
+## License
+
+课程作业项目。示例角色与头像均为原创（头像由脚本生成），可自由分发；
+社区角色卡的版权归原作者。

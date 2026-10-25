@@ -1,0 +1,24 @@
+# 一条命令起整站：docker compose up --build
+#
+# 说明：
+#   - 只暴露 8787：后端同时提供 API 与前端静态资源，不需要再起一个前端容器
+#   - ./data 挂到容器内，会话、角色、头像、剧本都留在宿主机上
+#   - 模型 key 通过环境变量传，不写进镜像；也可以用 config/user.yaml 挂载
+services:
+  tavern:
+    build: .
+    image: tavern-ai:local
+    container_name: tavern-ai
+    ports:
+      - '8787:8787'
+    environment:
+      NODE_ENV: production
+      # 需要在容器外访问时改成 0.0.0.0
+      TAVERN_SERVER__HOST: 0.0.0.0
+      # 模型服务；也可以在 config/user.yaml 里配
+      # TAVERN_PROVIDER__APIKEY: sk-xxx
+    volumes:
+      - ./data:/repo/data
+      # 想用宿主机上的配置就打开这一行（会把本地 user.yaml 挂进去）
+      # - ./config/user.yaml:/repo/config/user.yaml:ro
+    restart: unless-stopped
