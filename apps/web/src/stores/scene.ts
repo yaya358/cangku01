@@ -15,6 +15,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import {
   createPrivateScene,
+  ensureSceneOpening,
   fetchAffinity,
   fetchJournal,
   fetchScene,
@@ -51,6 +52,8 @@ export interface SceneBubble {
   optimistic?: boolean;
   /** 剧情事件提示（不是消息，只是这一轮发生了什么） */
   notice?: { title: string; turn: number };
+  /** 开场 beat：世界在你进门时说的那一段 */
+  opening?: boolean;
   meta?: {
     durationMs?: number | null;
     totalTokens?: number | null;
@@ -67,6 +70,8 @@ function toBubble(message: Message): SceneBubble {
     speakerId: message.speakerId,
     whisper: message.whisper,
     eavesdrop: message.eavesdrop,
+    // 开场落库时用的是 system + narrate：刷新回来还能认出它
+    opening: message.role === 'system' && message.kind === 'narrate',
     meta: {
       durationMs: message.durationMs,
       totalTokens: message.usage?.totalTokens ?? null,
@@ -251,6 +256,10 @@ export const useSceneStore = defineStore('scene', () => {
       await loadSourceName();
       await loadAffinity();
       await loadJournal();
+      // 空场景：让世界先说一句，玩家不用自己编第一句
+      if (messages.value.length === 0 && present.value.length > 0) {
+        await openBeat(id);
+      }
     } catch (cause) {
       error.value = describeError(cause);
       scene.value = null;
@@ -259,6 +268,32 @@ export const useSceneStore = defineStore('scene', () => {
       messages.value = [];
     } finally {
       loading.value = false;
+    }
+  }
+
+  /**
+   * 开场 beat。
+   *
+   * 失败就当没有：世界没开口总比一个红条挡在对话前面好 —— 玩家照样可以自己说话。
+   */
+  async function openBeat(sceneId: string): Promise<void> {
+    try {
+      const result = await ensureSceneOpening(sceneId);
+      if (result.alreadyStarted || !result.beat) return;
+      const beat = result.beat;
+      messages.value = [
+        {
+          id: beat.messageId,
+          role: 'system',
+          content: beat.text,
+          createdAt: new Date().toISOString(),
+          kind: 'narrate',
+          opening: true,
+        },
+        ...messages.value,
+      ];
+    } catch {
+      // 开场是锦上添花，读不到就算了
     }
   }
 

@@ -693,6 +693,95 @@ describe('场景列表（对话页的入口）', () => {
   });
 });
 
+describe('开场 beat', () => {
+  it('第一次进场景：世界先说一句，落进对话里', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const patrol = await seedCharacter(app, '夜巡人');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss, patrol]);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/opening`,
+      });
+      expect(response.statusCode).toBe(200);
+      const result = response.json().data;
+      expect(result.alreadyStarted).toBe(false);
+      expect(result.beat.source).toBe('model');
+      expect(result.beat.text.length).toBeGreaterThan(0);
+
+      // 落库成 system + narrate：刷新后还能认出来是开场
+      const detail = await sceneDetail(app, sceneId);
+      expect(detail.messages).toHaveLength(1);
+      expect(detail.messages[0]).toMatchObject({ role: 'system', kind: 'narrate' });
+    });
+  });
+
+  it('已经开过场就不再演一遍：刷新页面不会重复生成', async () => {
+    await withApp(async ({ app, chatRequests }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      await app.inject({ method: 'POST', url: `/api/world/scenes/${sceneId}/opening` });
+      const before = chatRequests.length;
+
+      const again = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/opening`,
+      });
+      expect(again.json().data).toMatchObject({ alreadyStarted: true, beat: null });
+      // 没有新消息，也没有新的模型调用
+      expect(chatRequests.length).toBe(before);
+      const detail = await sceneDetail(app, sceneId);
+      expect(detail.messages).toHaveLength(1);
+    });
+  });
+
+  it('场景里没人时不编开场', async () => {
+    await withApp(async ({ app }) => {
+      const { sceneId } = await seedSave(app, '空场景', []);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/opening`,
+      });
+      expect(response.json().data).toMatchObject({ alreadyStarted: false, beat: null });
+      const detail = await sceneDetail(app, sceneId);
+      expect(detail.messages).toEqual([]);
+    });
+  });
+
+  it('开场会写进这一场的事实：下一句回复知道刚进门发生了什么', async () => {
+    await withApp(async ({ app, streamRequests }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      const opening = (
+        await app.inject({ method: 'POST', url: `/api/world/scenes/${sceneId}/opening` })
+      ).json().data;
+      await speak(app, sceneId, '来一杯。');
+
+      const prompt = lastStreamPrompt(streamRequests);
+      expect(prompt).toContain('你刚进门时');
+      expect(prompt).toContain(String(opening.beat.text).slice(0, 10));
+    });
+  });
+
+  it('已经有消息的场景不触发开场', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+      await speak(app, sceneId, '先来一杯。');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/opening`,
+      });
+      expect(response.json().data).toMatchObject({ alreadyStarted: true, beat: null });
+    });
+  });
+});
+
 describe('好感度', () => {
   it('每轮结束打一次分，并把变化写进库', async () => {
     await withApp(async ({ app, scoreCalls }) => {

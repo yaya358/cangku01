@@ -20,6 +20,7 @@ import {
 import type { EavesdropListener } from '../../core/world/eavesdrop.js';
 import { describeReachability } from '../../core/world/repository.js';
 import { firstSentence } from '../../core/world/journal.js';
+import { buildOpeningPrompt, cleanOpening, fallbackOpening } from '../../core/world/opening.js';
 import { buildScoringPrompt, parseScore, SCORE_FAILED_REASON } from '../../core/world/scoring.js';
 import { contentForSpeaker, whisperAudience } from '../../core/world/whisper.js';
 import type { AppInstance } from '../../types/fastify.js';
@@ -278,6 +279,85 @@ export function registerWorldRoutes(app: AppInstance): void {
       cast,
       conversationId: conversation?.id ?? null,
       messages,
+    });
+  });
+
+  /**
+   * 开场 beat：第一次走进这个场景时，让世界先说一句。
+   *
+   * 幂等：场景里已经有消息了就直接返回 alreadyStarted —— 刷新页面不该又演一遍。
+   * 生成失败也落一条兜底文案：场景必须「响一下」，否则玩家又面对一片空白。
+   */
+  app.post(`${WORLD_SCENES_ENDPOINT}/:id/opening`, async (request) => {
+    const { id } = request.params as { id: string };
+    const scene = app.world().getScene(id);
+    if (!scene) throw AppError.notFound(`场景不存在: ${id}`);
+
+    const existing = app.conversations().findByScene(id);
+    if (existing && app.messages().listByConversation(existing.id).length > 0) {
+      return success(request.id, { alreadyStarted: true, beat: null });
+    }
+
+    const present = describePresent(id);
+    const members = present
+      .map((person) => app.characters().getById(person.id))
+      .filter((item): item is NonNullable<typeof item> => !!item);
+
+    if (members.length === 0) {
+      // 没人的场景不编开场：那会变成一段自说自话
+      return success(request.id, { alreadyStarted: false, beat: null });
+    }
+
+    const conversation =
+      existing ??
+      app.conversations().create({
+        characterId: members[0]!.id,
+        title: scene.name,
+        sceneId: id,
+      });
+
+    const quest = app.journal().activeQuest(scene.saveId);
+    const input = {
+      sceneName: scene.name,
+      kind: scene.kind,
+      present: present.map((person) => ({ name: person.name, busyWith: person.busyWith })),
+      focusName: quest?.focusCharacterName ?? null,
+      chapter: quest?.chapter,
+      playerName: conversation.player.name || undefined,
+    };
+
+    let text = '';
+    let source: 'model' | 'fallback' = 'fallback';
+    try {
+      const provider = resolveProvider(app);
+      const generated = await provider.chat(
+        {
+          model: provider.defaultModel,
+          messages: buildOpeningPrompt(input),
+          params: { temperature: 0.9 },
+        },
+        { requestId: request.id },
+      );
+      text = cleanOpening(generated.text);
+      if (text.length > 0) source = 'model';
+    } catch (error) {
+      request.log.warn({ err: error }, '开场生成失败，使用兜底');
+    }
+    if (text.length === 0) text = fallbackOpening(input);
+
+    // 落成 system + narrate：界面按「旁白」渲染，组装上下文时会被过滤，
+    // 所以另外记一条 fact，让第一句回复知道刚进门时发生了什么。
+    const message = app.messages().append(conversation.id, {
+      role: 'system',
+      content: text,
+      kind: 'narrate',
+    });
+    app.conversations().touch(conversation.id, message.id);
+    app.scriptEvents().recordFact(conversation.id, 'opening', `你刚进门时：${text}`);
+
+    return success(request.id, {
+      alreadyStarted: false,
+      beat: { messageId: message.id, text, source },
     });
   });
 

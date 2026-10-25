@@ -8,6 +8,7 @@ import type {
   Save,
   Scene,
   SceneDetail,
+  SceneOpening,
 } from '@tavern/shared';
 import {
   WORLD_SAVES_ENDPOINT,
@@ -16,6 +17,7 @@ import {
   worldSaveJournalEndpoint,
   worldSaveScenesEndpoint,
   worldSceneEndpoint,
+  worldSceneOpeningEndpoint,
   worldScenePrivateEndpoint,
   worldSceneReturnEndpoint,
   worldSceneStreamEndpoint,
@@ -65,6 +67,15 @@ export function createSave(input: CreateSaveInput): Promise<{ save: Save; scene:
 /** 场景详情：场景 + 在场者 + 名字对照表 + 当前分支的消息。 */
 export function fetchScene(id: string): Promise<SceneDetail> {
   return apiGet<SceneDetail>(worldSceneEndpoint(id), { timeoutMs: 15_000 });
+}
+
+/**
+ * 第一次走进场景时让世界先写一句（幂等）。
+ *
+ * 放成显式请求而不是塞进 GET 场景详情里：GET 不该产生副作用。
+ */
+export function ensureSceneOpening(id: string): Promise<SceneOpening> {
+  return apiPost<SceneOpening>(worldSceneOpeningEndpoint(id), {}, { timeoutMs: 30_000 });
 }
 
 /** 这个存档里所有人对你的好感（界面上的好感条）。 */

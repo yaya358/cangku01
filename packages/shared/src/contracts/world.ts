@@ -95,6 +95,28 @@ export const PrivateSceneResultSchema = z.object({
 });
 export type PrivateSceneResult = z.infer<typeof PrivateSceneResultSchema>;
 
+/**
+ * 开场 beat：第一次走进这个场景时，世界先说一句。
+ *
+ * 没有它，一进场景是一片空白，玩家得自己编第一句；
+ * 有了它，「点进去有事发生」才成立 —— 主线要的那个人也会先动一下。
+ */
+export const SceneOpeningSchema = z.object({
+  /** 已经开过场了（同一场景只开场一次） */
+  alreadyStarted: z.boolean(),
+  /** 这次生成的开场；已经开过就是 null */
+  beat: z
+    .object({
+      /** 落库的那条消息 id（刷新后还在） */
+      messageId: z.string(),
+      text: z.string(),
+      /** 是模型写的，还是兜底文案 */
+      source: z.enum(['model', 'fallback']),
+    })
+    .nullable(),
+});
+export type SceneOpening = z.infer<typeof SceneOpeningSchema>;
+
 /** 新建存档：顺带建第一个场景，并把这些人放进去。 */
 export const CreateSaveSchema = z.object({
   name: z.string().min(1).max(60),

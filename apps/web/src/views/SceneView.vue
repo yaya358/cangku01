@@ -175,13 +175,20 @@
                 {
                   'bubble--optimistic': bubble.optimistic,
                   'bubble--notice': bubble.notice,
+                  'bubble--opening': bubble.opening,
                   'bubble--whisper': bubble.whisper,
                   'bubble--eavesdrop': bubble.eavesdrop,
                 },
               ]"
             >
+              <!-- 开场 beat：你进门时世界里发生的那一下 -->
+              <p v-if="bubble.opening" class="opening">
+                <span class="opening__head">开场</span>
+                <span class="opening__body">{{ bubble.content }}</span>
+              </p>
+
               <!-- 场景日志：谁看见了你们离开、低声说话有没有被听见（不是谁说的话） -->
-              <p v-if="bubble.role === 'system' && !bubble.notice" class="bubble__log">
+              <p v-else-if="bubble.role === 'system' && !bubble.notice" class="bubble__log">
                 {{ bubble.content }}
               </p>
 
@@ -956,6 +963,32 @@ onBeforeUnmount(() => {
   color: var(--text-dim);
   font-size: 12.5px;
   line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+/* 开场：进门时世界说的那一段，比普通日志显眼、比角色台词安静 */
+.opening {
+  display: flex;
+  padding: 10px 14px;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px dashed rgba(224, 167, 94, 0.28);
+  border-radius: 10px;
+  background: rgba(224, 167, 94, 0.04);
+}
+
+.opening__head {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  opacity: 0.8;
+}
+
+.opening__body {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.85;
   white-space: pre-wrap;
 }
 

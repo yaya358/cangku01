@@ -136,6 +136,11 @@ export function worldSceneStreamEndpoint(id: string): string {
   return `${worldSceneEndpoint(id)}/stream`;
 }
 
+/** 第一次走进场景时，让世界先写一句开场（幂等）。 */
+export function worldSceneOpeningEndpoint(id: string): string {
+  return `${worldSceneEndpoint(id)}/opening`;
+}
+
 /** 场景的在场者集合（进场）。 */
 export function worldScenePresenceEndpoint(id: string): string {
   return `${worldSceneEndpoint(id)}/presence`;
