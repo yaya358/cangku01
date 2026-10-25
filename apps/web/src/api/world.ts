@@ -2,6 +2,7 @@ import type {
   ChatStreamPayload,
   CreateSaveInput,
   MessageKind,
+  PrivateSceneResult,
   Save,
   Scene,
   SceneDetail,
@@ -10,6 +11,8 @@ import {
   WORLD_SAVES_ENDPOINT,
   worldSaveScenesEndpoint,
   worldSceneEndpoint,
+  worldScenePrivateEndpoint,
+  worldSceneReturnEndpoint,
   worldSceneStreamEndpoint,
 } from '@tavern/shared';
 import { fetchCharacters } from './characters';
@@ -77,6 +80,28 @@ export async function sendSceneTurn(
 
   await throwIfNotOk(response);
   await readSseStream(response, handlers.onEvent);
+}
+
+/**
+ * 把在场的人带到私密场景（后巷）。
+ *
+ * 服务端会顺手把「离开」这件事记进原场景的日志 —— 带人走不是免费的，
+ * 留下的人看见了就是看见了。
+ */
+export function createPrivateScene(
+  sceneId: string,
+  characterId: string,
+  name?: string,
+): Promise<PrivateSceneResult> {
+  return apiPost<PrivateSceneResult>(worldScenePrivateEndpoint(sceneId), {
+    characterId,
+    ...(name ? { name } : {}),
+  });
+}
+
+/** 从私密场景回到原来那个公开场景（把人一起带回去）。 */
+export function returnToSourceScene(sceneId: string): Promise<{ scene: Scene }> {
+  return apiPost<{ scene: Scene }>(worldSceneReturnEndpoint(sceneId));
 }
 
 /**

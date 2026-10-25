@@ -26,28 +26,36 @@ export interface PresenceEntry {
   leftTurn: number | null;
   /** 正在忙什么（擦杯子、巡街）—— 在忙就未必有空理你 */
   busyWith: string | null;
+  /** 为什么走的（巡街去了 / 被你带去后巷）—— 只有 leftTurn 说不清这件事 */
+  reason: string | null;
 }
 
 /** 存档沿用 shared 的类型；旧名字保留，避免改动面过大。 */
 export type WorldSave = Save;
 export type { Reachability, Scene };
 
+/** 建场景时的入参。 */
+export interface CreateSceneInput {
+  name: string;
+  kind?: 'public' | 'private';
+  closeness?: number;
+  /** 私密场景：从哪个公开场景出去的（回来时要知道回哪） */
+  sourceSceneId?: string | null;
+}
+
 export interface WorldRepository {
   createSave: (name: string) => WorldSave;
   getSave: (id: string) => WorldSave | undefined;
   listSaves: () => WorldSave[];
 
-  createScene: (
-    saveId: string,
-    input: { name: string; kind?: 'public' | 'private'; closeness?: number },
-  ) => Scene;
+  createScene: (saveId: string, input: CreateSceneInput) => Scene;
   getScene: (id: string) => Scene | undefined;
   listScenes: (saveId: string) => Scene[];
 
   /** 让某人进入场景（已在场则只更新忙的状态） */
   enter: (sceneId: string, characterId: string, turn: number, busyWith?: string | null) => void;
-  /** 让某人离开 */
-  leave: (sceneId: string, characterId: string, turn: number) => void;
+  /** 让某人离开；reason 记下为什么走（离开原因也是世界的一部分） */
+  leave: (sceneId: string, characterId: string, turn: number, reason?: string | null) => void;
   /** 当前在场者（leftTurn 为 null） */
   present: (sceneId: string) => PresenceEntry[];
   /** 该场景出现过的所有人（含已离开） */
@@ -70,6 +78,7 @@ interface SceneRow {
   name: string;
   kind: string;
   closeness: number;
+  source_scene_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +88,7 @@ interface PresenceRow {
   entered_turn: number;
   left_turn: number | null;
   busy_with: string | null;
+  reason: string | null;
 }
 
 function toSave(row: SaveRow): WorldSave {
@@ -98,6 +108,7 @@ function toScene(row: SceneRow): Scene {
     name: row.name,
     kind: row.kind === 'private' ? 'private' : 'public',
     closeness: Number(row.closeness ?? 0.3),
+    sourceSceneId: row.source_scene_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -109,6 +120,7 @@ function toPresence(row: PresenceRow): PresenceEntry {
     enteredTurn: row.entered_turn,
     leftTurn: row.left_turn,
     busyWith: row.busy_with,
+    reason: row.reason ?? null,
   };
 }
 
@@ -143,14 +155,15 @@ export function createWorldRepository(db: DatabaseSync): WorldRepository {
       const id = randomUUID();
       const at = now();
       db.prepare(
-        `INSERT INTO scenes (id, save_id, name, kind, closeness, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO scenes (id, save_id, name, kind, closeness, source_scene_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         saveId,
         input.name.trim() || '未命名场景',
         input.kind ?? 'public',
         input.closeness ?? 0.3,
+        input.sourceSceneId ?? null,
         at,
         at,
       );
@@ -172,21 +185,19 @@ export function createWorldRepository(db: DatabaseSync): WorldRepository {
     },
 
     enter(sceneId, characterId, turn, busyWith = null): void {
-      // 已经在场：只更新忙的状态，不重置进场的轮次
+      // 已经在场：只更新忙的状态，不重置进场的轮次；回来的人顺手把离开原因清掉
       db.prepare(
-        `INSERT INTO presence (scene_id, character_id, entered_turn, left_turn, busy_with)
-         VALUES (?, ?, ?, NULL, ?)
+        `INSERT INTO presence (scene_id, character_id, entered_turn, left_turn, busy_with, reason)
+         VALUES (?, ?, ?, NULL, ?, NULL)
          ON CONFLICT (scene_id, character_id)
-         DO UPDATE SET left_turn = NULL, busy_with = excluded.busy_with`,
+         DO UPDATE SET left_turn = NULL, busy_with = excluded.busy_with, reason = NULL`,
       ).run(sceneId, characterId, turn, busyWith);
     },
 
-    leave(sceneId, characterId, turn): void {
-      db.prepare('UPDATE presence SET left_turn = ? WHERE scene_id = ? AND character_id = ?').run(
-        turn,
-        sceneId,
-        characterId,
-      );
+    leave(sceneId, characterId, turn, reason = null): void {
+      db.prepare(
+        'UPDATE presence SET left_turn = ?, reason = ? WHERE scene_id = ? AND character_id = ?',
+      ).run(turn, reason, sceneId, characterId);
     },
 
     present(sceneId: string): PresenceEntry[] {

@@ -122,6 +122,23 @@ export type ChatStreamPayload =
       /** 这一幕是结局 */
       isEnding: boolean;
     }
+  | {
+      /**
+       * 低声说话的结果：被谁听见了 / 没人注意到。
+       *
+       * 没听见也发这一帧 —— 玩家需要确定的反馈，否则永远不知道自己安不安全。
+       */
+      type: 'eavesdrop';
+      heard: boolean;
+      /** 谁听见了（heard 为 true 时才有） */
+      listener?: { id: string; name: string };
+      /** 听见后生成的那句反应（已落库，前端插进对话流） */
+      messageId?: string;
+      /** 给玩家看的那句话（没听见时是「没人注意到」，措辞由服务端统一） */
+      text: string;
+      /** 听见的内容碰到了他的秘密 */
+      sensitive?: boolean;
+    }
   | { type: 'error'; code: string; message: string; retryable: boolean };
 
 /** 非流式接口的返回体。 */

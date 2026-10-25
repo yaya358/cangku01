@@ -9,7 +9,13 @@ import type {
 } from '@tavern/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { fetchScene, sendSceneTurn } from '@/api/world';
+import {
+  createPrivateScene,
+  fetchScene,
+  listScenes,
+  returnToSourceScene,
+  sendSceneTurn,
+} from '@/api/world';
 import { describeError } from '@/utils/errors';
 
 /**
@@ -29,6 +35,10 @@ export interface SceneBubble {
   kind?: MessageKind;
   /** 这句是谁说的（场景里可能有好几个人） */
   speakerId?: string | null;
+  /** 压低声音说的 */
+  whisper?: boolean;
+  /** 第三者听见私聊之后的反应 */
+  eavesdrop?: boolean;
   /** 正在接收流（显示光标） */
   pending?: boolean;
   /** 乐观插入、还没被服务端确认 */
@@ -49,6 +59,8 @@ function toBubble(message: Message): SceneBubble {
     createdAt: message.createdAt,
     kind: message.kind,
     speakerId: message.speakerId,
+    whisper: message.whisper,
+    eavesdrop: message.eavesdrop,
     meta: {
       durationMs: message.durationMs,
       totalTokens: message.usage?.totalTokens ?? null,
@@ -62,6 +74,8 @@ export const useSceneStore = defineStore('scene', () => {
   const cast = ref<SceneCastMember[]>([]);
   const conversationId = ref<string | null>(null);
   const messages = ref<SceneBubble[]>([]);
+  /** 私密场景：原来那个公开场景叫什么（回头的路要有名字才好走） */
+  const sourceSceneName = ref<string | null>(null);
   const loading = ref(false);
   const streaming = ref(false);
   const error = ref<string | null>(null);
@@ -87,6 +101,20 @@ export const useSceneStore = defineStore('scene', () => {
     conversationId.value = detail.conversationId;
   }
 
+  /** 私密场景开回来之后，把来源场景的名字也取到手（只为了文案）。 */
+  async function loadSourceName(): Promise<void> {
+    const current = scene.value;
+    sourceSceneName.value = null;
+    if (!current || current.kind !== 'private' || !current.sourceSceneId) return;
+    try {
+      const scenes = await listScenes(current.saveId);
+      sourceSceneName.value =
+        scenes.find((item) => item.id === current.sourceSceneId)?.name ?? null;
+    } catch {
+      // 名字取不到不影响说话，退化成「回到原处」
+    }
+  }
+
   async function open(id: string): Promise<void> {
     loading.value = true;
     error.value = null;
@@ -94,6 +122,7 @@ export const useSceneStore = defineStore('scene', () => {
       const detail = await fetchScene(id);
       applyMeta(detail);
       messages.value = detail.messages.map(toBubble);
+      await loadSourceName();
     } catch (cause) {
       error.value = describeError(cause);
       scene.value = null;
@@ -108,7 +137,7 @@ export const useSceneStore = defineStore('scene', () => {
   /**
    * 重新对一遍现场。
    *
-   * 一轮结束后在场者可能已经变了（第 3 步起真的会变），所以每轮都要复核；
+   * 一轮结束后在场者可能已经变了，所以每轮都要复核；
    * 生成被中止时消息仍在对岸写入，这时只同步在场者，别用半截消息覆盖界面。
    */
   async function refresh(options: { messages: boolean }): Promise<void> {
@@ -123,7 +152,37 @@ export const useSceneStore = defineStore('scene', () => {
     }
   }
 
-  async function send(content: string, kind: MessageKind = 'speak'): Promise<void> {
+  /** 偷听事件：听见了就把反应插进对话流，没听见也要给一句确定的反馈。 */
+  function applyEavesdrop(event: Extract<ChatStreamPayload, { type: 'eavesdrop' }>): void {
+    if (event.heard && event.listener) {
+      const listener = event.listener;
+      if (!cast.value.some((member) => member.id === listener.id)) {
+        cast.value = [...cast.value, listener];
+      }
+      messages.value.push({
+        id: event.messageId ?? `tmp-e-${++seq}`,
+        role: 'assistant',
+        content: event.text,
+        createdAt: new Date().toISOString(),
+        speakerId: listener.id,
+        eavesdrop: true,
+      });
+      return;
+    }
+
+    messages.value.push({
+      id: event.messageId ?? `tmp-miss-${++seq}`,
+      role: 'system',
+      content: event.text,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  async function send(
+    content: string,
+    kind: MessageKind = 'speak',
+    whisper = false,
+  ): Promise<void> {
     const text = content.trim();
     const current = scene.value;
     if (!current || streaming.value || text.length === 0) return;
@@ -136,6 +195,7 @@ export const useSceneStore = defineStore('scene', () => {
       role: 'user',
       content: text,
       kind,
+      whisper,
       createdAt: new Date().toISOString(),
       optimistic: true,
     });
@@ -162,6 +222,7 @@ export const useSceneStore = defineStore('scene', () => {
       await sendSceneTurn(current.id, text, {
         signal: controller.signal,
         kind,
+        whisper,
         onEvent: (event: ChatStreamPayload) => {
           switch (event.type) {
             case 'delta': {
@@ -184,6 +245,9 @@ export const useSceneStore = defineStore('scene', () => {
                 id: event.assistantMessageId,
                 optimistic: false,
               });
+              break;
+            case 'eavesdrop':
+              applyEavesdrop(event);
               break;
             case 'notice':
               // 剧情事件：插在助手气泡之前，读起来就是「提示 → 有人应对」
@@ -224,6 +288,38 @@ export const useSceneStore = defineStore('scene', () => {
     }
   }
 
+  /**
+   * 把在场的人带到私密场景。
+   *
+   * 返回新场景 id 交给页面跳转 —— 换地方是页面级的事，不该由 store 改路由。
+   */
+  async function pullAway(characterId: string): Promise<string | null> {
+    const current = scene.value;
+    if (!current || streaming.value) return null;
+    error.value = null;
+    try {
+      const result = await createPrivateScene(current.id, characterId);
+      return result.scene.id;
+    } catch (cause) {
+      error.value = describeError(cause);
+      return null;
+    }
+  }
+
+  /** 从私密场景回到原来的地方（把人带回去）。 */
+  async function goBack(): Promise<string | null> {
+    const current = scene.value;
+    if (!current || current.kind !== 'private') return null;
+    error.value = null;
+    try {
+      const result = await returnToSourceScene(current.id);
+      return result.scene.id;
+    } catch (cause) {
+      error.value = describeError(cause);
+      return null;
+    }
+  }
+
   function stop(): void {
     controller?.abort();
   }
@@ -238,6 +334,7 @@ export const useSceneStore = defineStore('scene', () => {
     cast,
     conversationId,
     messages,
+    sourceSceneName,
     loading,
     streaming,
     error,
@@ -248,6 +345,8 @@ export const useSceneStore = defineStore('scene', () => {
     open,
     refresh,
     send,
+    pullAway,
+    goBack,
     stop,
     clearError,
   };

@@ -28,6 +28,8 @@ const PRIORITY = {
   // 剧情事实：已经算数的事，丢了角色就会「翻脸不认」
   fact: 685,
   scenario: 650,
+  // 此刻在哪个场景、谁在场：比世界书要紧（说错人比少一段设定更伤）
+  scene: 660,
   worldbook: 600,
   summary: 500,
   historyBase: 300,
@@ -95,6 +97,13 @@ export function truncateToTokens(text: string, maxTokens: number): string {
  */
 function wrapUserInput(input: AssembleInput, userName: string): string {
   const text = input.userInput.trim();
+  /**
+   * 低声只是「怎么说」，不改变「说什么」：所以先按输入方式套壳，
+   * 再在说话这一档上换成压低声音的说法。行动/旁白低声没有意义，原样处理。
+   */
+  if (input.whisper && (input.userInputKind === undefined || input.userInputKind === 'speak')) {
+    return `${userName}压低声音说：「${text}」`;
+  }
   switch (input.userInputKind) {
     case 'act':
       return `${userName}（行动）：${text}`;
@@ -186,6 +195,44 @@ function collectLayers(input: AssembleInput, charName: string, userName: string)
         content: `【场景】${substitute(character.scenario.trim(), charName, userName)}`,
         priority: PRIORITY.scenario,
         splittable: true,
+      }),
+    );
+  }
+
+  /**
+   * 3.5 此刻的地方与在场的人（世界模式）。
+   *
+   * 这段的价值不在氛围，而在约束：模型很容易把「不在场的人」也拉进来说话，
+   * 或者把压低声音说的话当众说出来。把「谁在」「听不听得见」写进 prompt，
+   * 它才知道该对谁说、该不该避人。
+   */
+  if (input.scene) {
+    const scene = input.scene;
+    const privateScene = scene.kind === 'private';
+    const parts: string[] = [
+      `【此刻的地方】${scene.name} · ${privateScene ? '只有你们两个人' : '公开场所，人来人往'}`,
+    ];
+    if (privateScene) {
+      parts.push('周围没有别人 —— 说出口的话不会传出去。');
+    } else if (scene.others && scene.others.length > 0) {
+      const others = scene.others
+        .map((other) => (other.busyWith ? `${other.name}（${other.busyWith}）` : other.name))
+        .join('、');
+      parts.push(`在场的还有：${others}。`);
+      parts.push('你只对在场的人说话，不要凭空叫出不在场的人。');
+      if (input.whisper) {
+        parts.push(`他这句话是压低声音说的 —— 旁边的${others}未必听得见。`);
+      }
+    }
+
+    layers.push(
+      makeLayer({
+        id: 'scene',
+        kind: 'scene',
+        title: '此刻的地方',
+        content: substitute(parts.join('\n'), charName, userName),
+        priority: PRIORITY.scene,
+        splittable: false,
       }),
     );
   }
@@ -430,6 +477,7 @@ function buildMessages(layers: readonly ContextLayer[]): ChatMessage[] {
         layer.kind === 'persona' ||
         layer.kind === 'user_persona' ||
         layer.kind === 'scenario' ||
+        layer.kind === 'scene' ||
         layer.kind === 'motive' ||
         layer.kind === 'event' ||
         layer.kind === 'fact' ||

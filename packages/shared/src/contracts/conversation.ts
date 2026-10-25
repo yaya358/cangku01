@@ -44,6 +44,13 @@ export const MessageSchema = z.object({
   kind: MessageKindSchema,
   /** 大厅里这句是谁说的（一对一为 null） */
   speakerId: z.string().nullable(),
+  /** 这句是压低声音说的：同场的人有机会听不到 */
+  whisper: z.boolean(),
+  /**
+   * 这条不是正常接话，是第三者听见私聊之后的反应。
+   * 单独标出来的用处：界面上要标「他听见了」，轮转时也不能算作「轮到他说话」。
+   */
+  eavesdrop: z.boolean(),
   /** 重说的候选内容；空数组表示没有候选（普通消息） */
   swipes: z.array(z.string()),
   /** 当前选中的候选下标 */
@@ -68,7 +75,6 @@ export const PlayerSchema = z.object({
   goal: z.string().max(400),
 });
 export type Player = z.infer<typeof PlayerSchema>;
-
 
 /** 大厅里在场的一个角色。 */
 export const ConversationMemberSchema = z.object({
@@ -98,7 +104,6 @@ export const ConversationSchema = z.object({
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
-
 /** 新建会话。 */
 export const CreateConversationSchema = z.object({
   characterId: z.string().min(1),
@@ -126,6 +131,10 @@ export const AppendMessageSchema = z.object({
   content: z.string().max(200_000),
   /** 不传就是「说话」，老调用方不用改 */
   kind: MessageKindSchema.optional(),
+  /** 压低声音说（世界模式里同场的人有机会听不到） */
+  whisper: z.boolean().optional(),
+  /** 偷听者的反应（由服务端在判定命中后写入，前端不传） */
+  eavesdrop: z.boolean().optional(),
   /** 大厅里这条是谁说的 */
   speakerId: z.string().optional(),
   parentId: z.string().optional(),

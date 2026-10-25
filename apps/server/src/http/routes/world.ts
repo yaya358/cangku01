@@ -1,10 +1,24 @@
-import type { ChatMessage, ChatStreamPayload, ScenePresent } from '@tavern/shared';
+import type {
+  Character,
+  ChatMessage,
+  ChatStreamPayload,
+  Message,
+  ScenePresent,
+} from '@tavern/shared';
 import { CreateSaveSchema, WORLD_SAVES_ENDPOINT, WORLD_SCENES_ENDPOINT } from '@tavern/shared';
 import { z } from 'zod';
 import type { ServerResponse } from 'node:http';
 import { prepareConversationContext } from '../../core/context/index.js';
 import { resolveThread } from '../../core/chat/thread.js';
+import {
+  buildReactionPrompt,
+  isCurious,
+  isSensitive,
+  rollEavesdrop,
+} from '../../core/world/eavesdrop.js';
+import type { EavesdropListener } from '../../core/world/eavesdrop.js';
 import { describeReachability } from '../../core/world/repository.js';
+import { contentForSpeaker, whisperAudience } from '../../core/world/whisper.js';
 import type { AppInstance } from '../../types/fastify.js';
 import { resolveProvider } from '../chat-support.js';
 import { success } from '../envelope.js';
@@ -16,7 +30,12 @@ import { parseOrThrow, pipeProviderStream } from './conversations.js';
  *
  * 与旧「按角色开会话」的区别：说话的地方是**场景**，能接话的人由在场者决定。
  * 不在场的人不会开口，@ 他也没用 —— 世界才有"人走了"这回事。
+ *
+ * 第 3 步在这套地基上加了两件事，都是「信息有代价」的具体形态：
+ *   - 私密场景：把人带到后巷，外人听不到，但离开会被看见
+ *   - 低声与偷听：不换地方、压低声音说，同场的人有概率听见并当场作出反应
  */
+
 /** 写一帧 SSE（与 conversations.ts 里的实现一致）。 */
 function writeEvent(raw: ServerResponse, payload: ChatStreamPayload): void {
   try {
@@ -25,6 +44,9 @@ function writeEvent(raw: ServerResponse, payload: ChatStreamPayload): void {
     // 连接已断
   }
 }
+
+/** 私密场景默认的安静程度：后巷比酒馆安静，低声说话更容易被听清。 */
+const PRIVATE_SCENE_CLOSENESS = 0.75;
 
 export function registerWorldRoutes(app: AppInstance): void {
   /**
@@ -50,6 +72,34 @@ export function registerWorldRoutes(app: AppInstance): void {
         };
       })
       .filter((item): item is ScenePresent => item !== null);
+  }
+
+  /** 当前是第几轮：这个场景里玩家一共说过几句。 */
+  function sceneTurn(conversationId: string | null): number {
+    if (!conversationId) return 1;
+    const spoken = app
+      .messages()
+      .listByConversation(conversationId)
+      .filter((message) => message.role === 'user').length;
+    return spoken + 1;
+  }
+
+  /**
+   * 往场景日志里写一条「不是谁说的话，而是发生了一件事」。
+   *
+   * 用的是 system 消息：组装上下文时它会被过滤掉（不污染模型的历史），
+   * 但刷新页面后仍然在，玩家回头能看到「谁看见了我们离开」。
+   */
+  function appendSceneLine(conversationId: string | null, content: string): void {
+    if (!conversationId) return;
+    const conversation = app.conversations().getById(conversationId);
+    if (!conversation) return;
+    const message = app.messages().append(conversationId, {
+      role: 'system',
+      content,
+      ...(conversation.activeLeafId ? { parentId: conversation.activeLeafId } : {}),
+    });
+    app.conversations().touch(conversationId, message.id);
   }
 
   /** 建存档，顺带建一个默认场景（酒馆）。 */
@@ -154,8 +204,111 @@ export function registerWorldRoutes(app: AppInstance): void {
   app.delete(`${WORLD_SCENES_ENDPOINT}/:id/presence/:characterId`, async (request) => {
     const { id, characterId } = request.params as { id: string; characterId: string };
     if (!app.world().getScene(id)) throw AppError.notFound(`场景不存在: ${id}`);
-    app.world().leave(id, characterId, 1);
+    app.world().leave(id, characterId, sceneTurn(app.conversations().findByScene(id)?.id ?? null));
     return success(request.id, { left: characterId });
+  });
+
+  /**
+   * 把在场的人带到私密场景（后巷 / 账房）。
+   *
+   * 三条硬规则写在这里而不是前端：
+   *   1. 联系不上就带不走（不在场、已经走了、手上正忙着，各给各的理由）
+   *   2. 离开公共场景会被看见 —— 谁还在场谁就是目击者，写进场景日志
+   *   3. 私密场景记得自己是从哪出去的，回来时才有路
+   */
+  app.post(`${WORLD_SCENES_ENDPOINT}/:id/private`, async (request) => {
+    const { id } = request.params as { id: string };
+    const scene = app.world().getScene(id);
+    if (!scene) throw AppError.notFound(`场景不存在: ${id}`);
+    if (scene.kind === 'private') {
+      throw AppError.badRequest('已经在一个私密场景里了 —— 先回到原来的地方，再从那儿把人叫走。');
+    }
+
+    const body = parseOrThrow(
+      z.object({
+        characterId: z.string().min(1),
+        name: z.string().min(1).max(40).optional(),
+        closeness: z.number().min(0).max(1).optional(),
+      }),
+      request.body,
+      '私聊参数不合法',
+    );
+
+    const character = app.characters().getById(body.characterId);
+    if (!character) throw AppError.notFound(`角色不存在: ${body.characterId}`);
+
+    const reachability = app.world().reachability(id, character.id);
+    if (reachability === 'absent') throw AppError.validation(`${character.name}不在这里。`);
+    if (reachability === 'left') {
+      throw AppError.validation(`${character.name}已经走了 —— 得等下次遇见。`);
+    }
+    if (reachability === 'busy') {
+      throw AppError.validation(`${character.name}手上正忙着，这会儿走不开。`);
+    }
+
+    const conversation = app.conversations().findByScene(id);
+    const turn = sceneTurn(conversation?.id ?? null);
+    const privateScene = app.world().createScene(scene.saveId, {
+      name: body.name ?? '后巷',
+      kind: 'private',
+      closeness: body.closeness ?? PRIVATE_SCENE_CLOSENESS,
+      sourceSceneId: scene.id,
+    });
+    app.world().enter(privateScene.id, character.id, turn);
+    app.world().leave(id, character.id, turn, `跟你去了${privateScene.name}`);
+
+    // 判定「谁看见了」要在人走之后算：留下的才是目击者
+    const noticed = describePresent(id).map((person) => ({ id: person.id, name: person.name }));
+    const seenText =
+      noticed.length > 0
+        ? `你带着${character.name}离开了${scene.name} —— ${noticed.map((p) => p.name).join('、')}看见了。`
+        : `你带着${character.name}离开了${scene.name} —— 没人注意。`;
+    appendSceneLine(conversation?.id ?? null, seenText);
+    if (conversation) {
+      app.scriptEvents().recordFact(conversation.id, `scene-leave:${privateScene.id}`, seenText);
+    }
+
+    return success(request.id, { scene: privateScene, noticed });
+  });
+
+  /**
+   * 从私密场景回到原来那个公开场景，把人也带回去。
+   *
+   * 不做「随时传送」：这一步是玩家主动结束私聊。回去之后人仍然在场，
+   * 但「你们刚从后巷回来」会留在场景日志里，之后可以被人提起。
+   */
+  app.post(`${WORLD_SCENES_ENDPOINT}/:id/return`, async (request) => {
+    const { id } = request.params as { id: string };
+    const scene = app.world().getScene(id);
+    if (!scene) throw AppError.notFound(`场景不存在: ${id}`);
+    if (scene.kind !== 'private' || !scene.sourceSceneId) {
+      throw AppError.badRequest('这不是私密场景，没有可回的地方。');
+    }
+
+    const source = app.world().getScene(scene.sourceSceneId);
+    if (!source) throw AppError.notFound('原来那个场景已经不在了。');
+
+    const conversation = app.conversations().findByScene(source.id);
+    const turn = sceneTurn(conversation?.id ?? null);
+
+    const companions: Character[] = [];
+    for (const entry of app.world().present(id)) {
+      const character = app.characters().getById(entry.characterId);
+      if (!character) continue;
+      companions.push(character);
+      app.world().leave(id, character.id, turn, `回到了${source.name}`);
+      app.world().enter(source.id, character.id, turn);
+    }
+
+    if (conversation) {
+      const names = companions.map((character) => character.name).join('、');
+      const line =
+        names.length > 0 ? `你和${names}回到了${source.name}。` : `你回到了${source.name}。`;
+      appendSceneLine(conversation.id, line);
+      app.scriptEvents().recordFact(conversation.id, `scene-return:${scene.id}`, line);
+    }
+
+    return success(request.id, { scene: source });
   });
 
   /**
@@ -163,7 +316,7 @@ export function registerWorldRoutes(app: AppInstance): void {
    *
    * 谁先说：@ 了在场的人就他先说；否则按「已经开口过的次数」轮转 ——
    * 每轮会落两条消息（你 + 他），按消息总数取模会让同一个人一直说，
-   * 所以计数只数助手消息。
+   * 所以计数只数助手消息，且不把偷听反应算作「轮到他说话」。
    * 消息仍然落进 conversations/messages（scene_id 指向场景），
    * 这样重说、分支、导出都还能用。
    */
@@ -210,30 +363,67 @@ export function registerWorldRoutes(app: AppInstance): void {
       });
 
     const all = app.messages().listByConversation(conversation.id);
-    const spokenTurns = all.filter((message) => message.role === 'assistant').length;
+    const spokenTurns = all.filter(
+      (message) => message.role === 'assistant' && !message.eavesdrop,
+    ).length;
 
     const speaker =
       members.find((member) => body.content.includes(`@${member.name}`)) ??
       members[spokenTurns % members.length] ??
       members[0]!;
 
-    const history: ChatMessage[] = resolveThread(all, conversation.activeLeafId)
-      .filter((message) => message.role !== 'system')
-      .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
+    const thread: Message[] = resolveThread(all, conversation.activeLeafId).filter(
+      (message) => message.role !== 'system',
+    );
+
+    /**
+     * 历史按「这个人知道什么」裁剪。
+     *
+     * 低声说的话只有正主和听见的人知道：否则压低声音毫无意义 ——
+     * 没听见的人照样能在下一轮引用原话。
+     */
+    const audience = whisperAudience(thread);
+    const history: ChatMessage[] = thread.map((message) => ({
+      role: message.role as 'user' | 'assistant',
+      content: contentForSpeaker(message, speaker.id, audience),
+    }));
 
     // 接在当前叶子后面：不接的话每轮都会各自成一条根链，翻看时只剩最后一句
     const userMessage = app.messages().append(conversation.id, {
       role: 'user',
       content: body.content,
       kind: body.kind,
+      whisper: body.whisper,
       ...(conversation.activeLeafId ? { parentId: conversation.activeLeafId } : {}),
     });
+
+    const others = present
+      .filter((entry) => entry.characterId !== speaker.id)
+      .map((entry) => {
+        const character = app.characters().getById(entry.characterId);
+        if (!character) return null;
+        return {
+          character,
+          busyWith: entry.busyWith,
+          busy: Boolean(entry.busyWith),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
 
     const prepared = prepareConversationContext({
       character: speaker,
       entries: app.worldbook().listForCharacter(speaker.id),
       messages: [...history, { role: 'user', content: body.content }],
       userInputKind: body.kind,
+      whisper: body.whisper,
+      scene: {
+        name: scene.name,
+        kind: scene.kind,
+        others: others.map((other) => ({
+          name: other.character.name,
+          busyWith: other.busyWith,
+        })),
+      },
       userName: conversation.player.name || undefined,
       player: conversation.player,
       facts: app.scriptEvents().facts(conversation.id),
@@ -263,6 +453,7 @@ export function registerWorldRoutes(app: AppInstance): void {
       onError: (error) => request.log.error({ err: error }, '场景生成异常'),
     });
 
+    let assistantId: string | null = null;
     if (result.text.length > 0) {
       const assistant = app.messages().append(conversation.id, {
         role: 'assistant',
@@ -275,6 +466,7 @@ export function registerWorldRoutes(app: AppInstance): void {
         durationMs: result.durationMs,
         ...(result.firstTokenMs === null ? {} : { firstTokenMs: result.firstTokenMs }),
       });
+      assistantId = assistant.id;
       app.conversations().touch(conversation.id, assistant.id);
       writeEvent(raw, {
         type: 'saved',
@@ -283,6 +475,101 @@ export function registerWorldRoutes(app: AppInstance): void {
       });
     } else {
       app.conversations().touch(conversation.id, userMessage.id);
+    }
+
+    /**
+     * 低声 + 有第三者在场：判定有没有被听见。
+     *
+     * 没听见也要给确定反馈 —— 玩家得知道自己安不安全，否则低声就是个摆设。
+     * 听见了则生成一句反应插进对话流（不是弹窗），并记进这个场景的「认知」，
+     * 之后这个人再开口时是知道这件事的。
+     */
+    if (assistantId && body.whisper && scene.kind === 'public' && others.length > 0) {
+      const spokenTo = conversation.player.name || '那个人';
+      const decision = rollEavesdrop({
+        whisper: true,
+        closeness: scene.closeness,
+        listeners: others.map((other): EavesdropListener => ({
+          id: other.character.id,
+          name: other.character.name,
+          curious: isCurious(other.character),
+          busy: other.busy,
+        })),
+      });
+
+      const heard = decision.heard;
+      const listener = heard
+        ? others.find((other) => other.character.id === heard.listener.id)
+        : undefined;
+
+      if (heard && listener) {
+        const sensitive = isSensitive(listener.character.secret ?? '', body.content);
+        let reaction = '';
+        try {
+          const generated = await provider.chat(
+            {
+              model,
+              messages: buildReactionPrompt({
+                listener: listener.character,
+                heardText: body.content,
+                sensitive,
+                speakerName: spokenTo,
+              }),
+              /**
+               * 故意不设 maxTokens：这个上游会先写一段推理再给正文，
+               * 上限给紧（试过 120）时推理就把额度吃光，正文是空的。
+               * 长度靠提示词里的「不超过 40 字」约束，而不是靠截断。
+               */
+              params: { temperature: 0.9 },
+            },
+            { signal: controller.signal, requestId: request.id },
+          );
+          reaction = generated.text.trim();
+        } catch (error) {
+          // 反应生成失败不该让整轮作废：世界继续转，退化成一句确定发生的事
+          request.log.warn({ err: error }, '偷听反应生成失败，使用兜底');
+        }
+        if (reaction.length === 0) {
+          reaction = `${listener.character.name}朝这边看了一眼，没说话。`;
+        }
+
+        const reactionMessage = app.messages().append(conversation.id, {
+          role: 'assistant',
+          content: reaction,
+          parentId: assistantId,
+          speakerId: listener.character.id,
+          eavesdrop: true,
+          model,
+          provider: provider.meta.name,
+        });
+        app.conversations().touch(conversation.id, reactionMessage.id);
+        app
+          .scriptEvents()
+          .recordFact(
+            conversation.id,
+            `eavesdrop:${reactionMessage.id}`,
+            `${listener.character.name}听见了你压低声音说的话：「${body.content.slice(0, 120)}」` +
+              (sensitive ? '——这话碰到了他藏着的事，他记住了。' : ''),
+          );
+
+        writeEvent(raw, {
+          type: 'eavesdrop',
+          heard: true,
+          listener: { id: listener.character.id, name: listener.character.name },
+          messageId: reactionMessage.id,
+          text: reaction,
+          sensitive,
+        });
+      } else {
+        const text = '没人注意到你压低了声音。';
+        const noticeMessage = app.messages().append(conversation.id, {
+          role: 'system',
+          content: text,
+          parentId: assistantId,
+        });
+        app.conversations().touch(conversation.id, noticeMessage.id);
+        writeEvent(raw, { type: 'eavesdrop', heard: false, text });
+      }
     }
 
     raw.off('close', onClientClose);

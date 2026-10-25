@@ -1,7 +1,17 @@
 <template>
   <section class="scene">
     <header class="scene__head">
-      <RouterLink class="scene__back" to="/conversations">← 对话</RouterLink>
+      <!-- 私聊场景：回去要把人一起带回去，所以不是普通链接而是动作 -->
+      <button
+        v-if="isPrivate"
+        class="scene__back scene__back--action"
+        type="button"
+        :disabled="leaving"
+        @click="goBack"
+      >
+        ← 回到{{ sourceSceneName || '刚才的地方' }}
+      </button>
+      <RouterLink v-else class="scene__back" to="/conversations">← 对话</RouterLink>
 
       <div v-if="scene" class="scene__who">
         <h1 class="scene__name">{{ scene.name }}</h1>
@@ -68,7 +78,14 @@
         </span>
       </div>
 
-      <p v-if="hintText" class="presence__hint">{{ hintText }}</p>
+      <p v-if="hintText" class="presence__hint">
+        <span>{{ hintText }}</span>
+        <button v-if="canPullAway" class="tool" type="button" :disabled="pulling" @click="pullAway">
+          到没人的地方说话
+        </button>
+        <!-- 换地方不是免费的：说清代价，比事后解释好 -->
+        <span v-if="canPullAway" class="presence__note">他会跟你走 —— 留下的人会看见</span>
+      </p>
 
       <n-alert v-if="error" type="error" :title="error" closable @close="store.clearError()" />
 
@@ -84,11 +101,21 @@
           :class="[
             `bubble--${bubble.role}`,
             bubble.kind ? `bubble--${bubble.kind}` : '',
-            { 'bubble--optimistic': bubble.optimistic, 'bubble--notice': bubble.notice },
+            {
+              'bubble--optimistic': bubble.optimistic,
+              'bubble--notice': bubble.notice,
+              'bubble--whisper': bubble.whisper,
+              'bubble--eavesdrop': bubble.eavesdrop,
+            },
           ]"
         >
+          <!-- 场景日志：谁看见了你们离开、低声说话有没有被听见（不是谁说的话） -->
+          <p v-if="bubble.role === 'system' && !bubble.notice" class="bubble__log">
+            {{ bubble.content }}
+          </p>
+
           <!-- 剧情事件：不是谁说的话，而是「这一轮发生了什么」 -->
-          <p v-if="bubble.notice" class="notice">
+          <p v-else-if="bubble.notice" class="notice">
             <span class="notice__head"
               >第 {{ bubble.notice.turn }} 轮 · {{ bubble.notice.title }}</span
             >
@@ -98,7 +125,10 @@
           <template v-else>
             <p v-if="bubble.role === 'assistant' && bubble.speakerId" class="bubble__speaker">
               {{ store.speakerName(bubble.speakerId) }}
+              <span v-if="bubble.eavesdrop" class="bubble__tag">他听见了</span>
             </p>
+
+            <p v-if="bubble.whisper" class="bubble__tag bubble__tag--whisper">低声</p>
 
             <p class="bubble__body">
               {{ bubble.content
@@ -159,48 +189,60 @@ import { characterAvatarEndpoint } from '@tavern/shared';
 import { NAlert, NButton, NInput, NSpin } from 'naive-ui';
 import { storeToRefs } from 'pinia';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useSceneStore } from '@/stores/scene';
 
-const route = useRoute();
-const store = useSceneStore();
-const { scene, present, messages, loading, streaming, error, turn, isEmpty } = storeToRefs(store);
+/** 低声不是第六种「说什么」，而是「怎么说」：它按说话处理，只是加了压低声音。 */
+type InputMode = MessageKind | 'whisper';
 
-/** 输入方式：说话最常用，放第一个 */
-const INPUT_MODES = [
+const route = useRoute();
+const router = useRouter();
+const store = useSceneStore();
+const { scene, present, messages, loading, streaming, error, turn, isEmpty, isPrivate } =
+  storeToRefs(store);
+const { sourceSceneName } = storeToRefs(store);
+
+/** 输入方式：说话最常用，放第一个；低声排第二（世界模式里它最常用） */
+const INPUT_MODES: { value: InputMode; label: string; placeholder: string; hint: string }[] = [
   {
-    value: 'speak' as const,
+    value: 'speak',
     label: '说话',
     placeholder: '说点什么…（Enter 发送，Shift+Enter 换行）',
     hint: '会包成「你说：…」，在场的人都当作听到',
   },
   {
-    value: 'act' as const,
+    value: 'whisper',
+    label: '低声',
+    placeholder: '压低声音说…（同场的人有机会听不到）',
+    hint: '压低声音说 —— 在场的人有概率听见，也可能没有',
+  },
+  {
+    value: 'act',
     label: '行动',
     placeholder: '你要做什么…（例如：把杯子推到他面前）',
     hint: '包成「你（行动）：…」，做不做得到由世界说了算',
   },
   {
-    value: 'think' as const,
+    value: 'think',
     label: '心里想',
     placeholder: '想什么…（说出口的和想的不一样时很好用）',
     hint: '没人能听到你在想什么',
   },
   {
-    value: 'narrate' as const,
+    value: 'narrate',
     label: '旁白',
     placeholder: '叙述一段环境或时间跳跃…',
     hint: '当成场景叙述，不当作你说的话',
   },
   {
-    value: 'ooc' as const,
+    value: 'ooc',
     label: '场外',
     placeholder: '对扮演本身的说明（例如：这段写得再简短些）',
     hint: '是你在跟"导演"说话，不是角色的台词',
   },
 ];
 
-const mode = ref<MessageKind>('speak');
+const mode = ref<InputMode>('speak');
 const currentMode = computed(
   () => INPUT_MODES.find((item) => item.value === mode.value) ?? INPUT_MODES[0]!,
 );
@@ -211,6 +253,9 @@ const logRef = ref<HTMLElement | null>(null);
 const hintFor = ref<string | null>(null);
 /** 头像 404 的角色：退回首字，避免一片破图 */
 const brokenAvatars = ref<Record<string, boolean>>({});
+/** 正在带人换地方 / 正在回去 */
+const pulling = ref(false);
+const leaving = ref(false);
 
 function avatarOf(characterId: string): string {
   return characterAvatarEndpoint(characterId);
@@ -224,10 +269,17 @@ function toggleHint(characterId: string): void {
   hintFor.value = hintFor.value === characterId ? null : characterId;
 }
 
-const hintText = computed(() => {
-  if (!hintFor.value) return '';
-  return present.value.find((person: ScenePresent) => person.id === hintFor.value)?.hint ?? '';
-});
+/** 点开的这个人 */
+const selected = computed(
+  () => present.value.find((person: ScenePresent) => person.id === hintFor.value) ?? null,
+);
+
+const hintText = computed(() => selected.value?.hint ?? '');
+
+/** 能不能把他带走：只有公开场所里、现在有空的人才带得走。 */
+const canPullAway = computed(
+  () => scene.value?.kind === 'public' && selected.value?.reachability === 'available',
+);
 
 const placeText = computed(() => {
   if (!scene.value) return '';
@@ -239,8 +291,42 @@ const canSend = computed(() => !streaming.value && draft.value.trim().length > 0
 function submit(): void {
   if (!canSend.value) return;
   const text = draft.value;
+  const selected = mode.value;
   draft.value = '';
-  void store.send(text, mode.value);
+  // 低声就是「说话 + 压低声音」：不占一种新的输入方式，只是说话的另一种说法
+  if (selected === 'whisper') {
+    void store.send(text, 'speak', true);
+    return;
+  }
+  void store.send(text, selected, false);
+}
+
+/** 把人带到后巷：成功就跳进新场景，失败留在原地并说明原因。 */
+async function pullAway(): Promise<void> {
+  const person = selected.value;
+  if (!person || pulling.value) return;
+  pulling.value = true;
+  try {
+    const sceneId = await store.pullAway(person.id);
+    if (sceneId) {
+      hintFor.value = null;
+      await router.push(`/scenes/${sceneId}`);
+    }
+  } finally {
+    pulling.value = false;
+  }
+}
+
+/** 从私聊回到原来的地方（人一起回去）。 */
+async function goBack(): Promise<void> {
+  if (leaving.value) return;
+  leaving.value = true;
+  try {
+    const sceneId = await store.goBack();
+    if (sceneId) await router.push(`/scenes/${sceneId}`);
+  } finally {
+    leaving.value = false;
+  }
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -639,6 +725,73 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--text-faint);
   font-size: 12px;
+}
+
+/* 私聊场景里「回去」是个动作（要把人一起带回原场景），做成按钮但看着像链接 */
+.scene__back--action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.scene__back--action:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.scene__back--action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 换地方的代价说明：比提示正文再淡一档，别喧宾夺主 */
+.presence__note {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* 低声说的话：加个标签，气泡换成虚线，和当众说话区分开 */
+.bubble__tag {
+  align-self: flex-start;
+  padding: 0 6px;
+  border: 1px solid rgba(224, 167, 94, 0.35);
+  border-radius: 999px;
+  background: rgba(224, 167, 94, 0.08);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+
+/* 自己说的话靠右，标签也跟着靠右 */
+.bubble--user .bubble__tag {
+  align-self: flex-end;
+}
+
+.bubble--whisper .bubble__body {
+  border-style: dashed;
+  font-size: 13px;
+}
+
+/* 偷听反应：不是回你的话，而是他听见之后的自动反应 */
+.bubble--eavesdrop .bubble__body {
+  border-color: rgba(224, 167, 94, 0.4);
+  border-style: dashed;
+  background: rgba(224, 167, 94, 0.05);
+}
+
+.bubble__log {
+  width: 100%;
+  padding: 2px 6px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.bubble--system {
+  width: 100%;
 }
 
 @media (max-width: 640px) {

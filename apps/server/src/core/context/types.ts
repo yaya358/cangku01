@@ -18,6 +18,8 @@ export type LayerKind =
   | 'system'
   | 'persona'
   | 'scenario'
+  /** 世界模式：此刻在哪个场景、还有谁在场 */
+  | 'scene'
   /** 秘密与目的：让角色有戏、会主动出招 */
   | 'motive'
   /** 玩家身份：你是谁、你图什么 —— 决定角色怎么对你说话 */
@@ -107,6 +109,20 @@ export interface AssembleInput {
    * 不填按说话处理 —— 老调用方不用改。
    */
   userInputKind?: 'speak' | 'act' | 'think' | 'narrate' | 'ooc';
+  /** 这句是压低声音说的（世界模式：同场的人有机会听不到） */
+  whisper?: boolean;
+  /**
+   * 此刻的场景（世界模式）。
+   *
+   * 没有它，模型不知道屋里还有谁：会对着空气喊一个已经走了的人，
+   * 也不知道自己说的话别人听不听得见。
+   */
+  scene?: {
+    name: string;
+    kind?: 'public' | 'private';
+    /** 同场的其他人 */
+    others?: readonly { name: string; busyWith?: string | null }[];
+  };
   /**
    * 玩家身份：你是谁来、你图什么。
    * 不填时角色会把你当陌生人 —— 这是「对谁都客套」的根源。

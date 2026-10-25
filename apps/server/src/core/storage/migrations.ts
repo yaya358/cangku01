@@ -325,6 +325,25 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('ALTER TABLE messages ADD COLUMN whisper INTEGER NOT NULL DEFAULT 0');
     },
   },
+  {
+    version: 12,
+    name: 'whisper-eavesdrop-and-private-scenes',
+    up: (db) => {
+      /**
+       * 低声、偷听与私密场景。
+       *
+       *   messages.whisper        —— 迁移 11 就加好了，这一版才真的用上：压低声音说的那几句
+       *   messages.eavesdrop      —— 第三者听见私聊之后的反应。单独标出来的理由有二：
+       *                              界面上要写「（他听见了）」，轮转时也不能算作「轮到他说话」
+       *   presence.reason         —— 为什么走的。没有它，「他走了」分不清是他自己走的
+       *                              还是被你带走的，世界就少了半句话
+       *   scenes.source_scene_id  —— 私密场景是从哪个公开场景出去的：回来的时候得知道回哪
+       */
+      db.exec('ALTER TABLE messages ADD COLUMN eavesdrop INTEGER NOT NULL DEFAULT 0');
+      db.exec('ALTER TABLE presence ADD COLUMN reason TEXT');
+      db.exec('ALTER TABLE scenes ADD COLUMN source_scene_id TEXT');
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

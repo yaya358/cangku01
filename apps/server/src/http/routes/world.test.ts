@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ChatRequest } from '../../core/provider/index.js';
 import { pino } from 'pino';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../app.js';
 import type { AppInstance } from '../../types/fastify.js';
 import { defineProvider } from '../../testing/provider-fixture.js';
@@ -15,6 +15,8 @@ interface Harness {
   app: AppInstance;
   /** 每次生成收到的请求，按顺序记录 —— 用来断言「历史真的接上了」 */
   requests: ChatRequest[];
+  /** 非流式调用次数（偷听反应走这条） */
+  chatCalls: () => number;
 }
 
 async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
@@ -24,6 +26,7 @@ async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
 
   const requests: ChatRequest[] = [];
   let streamCalls = 0;
+  let chatCalls = 0;
   const provider = defineProvider({
     meta: { name: 'fake', version: '1.0.0' },
     capabilities: { streaming: true },
@@ -31,8 +34,9 @@ async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
     hasCredentials: true,
     async chat(request) {
       requests.push(request);
+      chatCalls += 1;
       return {
-        text: '一次性回复',
+        text: '他把手上的活停了半拍，没抬头。',
         finishReason: 'stop',
         model: 'fake-model',
         durationMs: 1,
@@ -58,7 +62,7 @@ async function withApp<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
   await app.ready();
 
   try {
-    return await run({ app, requests });
+    return await run({ app, requests, chatCalls: () => chatCalls });
   } finally {
     await app.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -103,11 +107,12 @@ async function speak(
   app: AppInstance,
   sceneId: string,
   content: string,
+  extra: Record<string, unknown> = {},
 ): Promise<Record<string, unknown>[]> {
   const response = await app.inject({
     method: 'POST',
     url: `/api/world/scenes/${sceneId}/stream`,
-    payload: { content },
+    payload: { content, ...extra },
   });
   expect(response.statusCode).toBe(200);
   return parseFrames(response.body);
@@ -118,6 +123,23 @@ async function sceneDetail(app: AppInstance, sceneId: string): Promise<Record<st
   expect(response.statusCode).toBe(200);
   return response.json().data;
 }
+
+/** 从 SSE 事件里找某一类，按任意形状读出（断言用）。 */
+function findEvent(
+  frames: Record<string, unknown>[],
+  type: string,
+): Record<string, any> | undefined {
+  return frames.find((frame) => frame.type === type) as Record<string, any> | undefined;
+}
+
+/** 编造一次偷听掷骰结果：0 = 一定被听见，0.999 = 一定没人听见。 */
+function forceRandom(value: number): void {
+  vi.spyOn(Math, 'random').mockReturnValue(value);
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('场景详情', () => {
   it('还没人开口时：在场者齐全、消息为空、没有会话', async () => {
@@ -305,6 +327,307 @@ describe('场景内说话', () => {
       // 只剩夜巡人在场，接话的只能是他
       expect(detail.present.map((person: any) => person.id)).toEqual([patrol]);
       expect(detail.messages[1].speakerId).toBe(patrol);
+    });
+  });
+});
+
+describe('低声与偷听', () => {
+  /** 三人场：老板 + 夜巡人 + 猫；低声说话时前两个都可能是偷听者。 */
+  async function threePeople(app: AppInstance) {
+    const boss = await seedCharacter(app, '月灯老板', {
+      personality: '话痨、爱打听、心软。',
+      secret: '名单上最后一个人是他自己。他巡夜，是因为不敢睡。',
+    });
+    const patrol = await seedCharacter(app, '夜巡人', {
+      personality: '寡言、克制、守信用。',
+      secret: '名单上最后一个人是他自己。',
+    });
+    const cat = await seedCharacter(app, '猫', { personality: '傲慢、懒、好奇。' });
+    const { sceneId } = await seedSave(app, '月灯镇', [boss, patrol, cat]);
+    return { boss, patrol, cat, sceneId };
+  }
+
+  it('低声这句会记下来，并且提示词里写明是压低了声音', async () => {
+    await withApp(async ({ app, requests }) => {
+      const { sceneId } = await threePeople(app);
+      forceRandom(0.999);
+
+      await speak(app, sceneId, '别声张，我问你一件事。', { whisper: true });
+
+      const detail = await sceneDetail(app, sceneId);
+      expect(detail.messages[0]).toMatchObject({ role: 'user', whisper: true });
+
+      const prompt = requests
+        .at(-1)!
+        .messages.map((message) => message.content)
+        .join('\n');
+      expect(prompt).toContain('压低声音');
+      expect(prompt).toContain('在场的还有');
+    });
+  });
+
+  it('没人听见时给确定反馈，而不是让玩家猜', async () => {
+    await withApp(async ({ app, chatCalls }) => {
+      const { sceneId } = await threePeople(app);
+      forceRandom(0.999);
+
+      const frames = await speak(app, sceneId, '那句话你查到了吗？', { whisper: true });
+      const eavesdrop = findEvent(frames, 'eavesdrop');
+      expect(eavesdrop).toMatchObject({ heard: false });
+      expect(String(eavesdrop?.text)).toContain('没人注意到');
+      // 没被听见就不该额外生成反应
+      expect(chatCalls()).toBe(0);
+
+      // 这条反馈也留在场景里：刷新之后还能看到自己当时是安全的
+      const detail = await sceneDetail(app, sceneId);
+      expect(detail.messages.at(-1)).toMatchObject({ role: 'system' });
+      expect(detail.messages.at(-1).content).toContain('没人注意到');
+    });
+  });
+
+  it('被听见时生成偷听者的反应，并插进对话流', async () => {
+    await withApp(async ({ app, chatCalls }) => {
+      const { sceneId } = await threePeople(app);
+      forceRandom(0);
+
+      // 第一句由老板接（轮转 0），听见的是留下的第一个人：夜巡人
+      const frames = await speak(app, sceneId, '名单上还有谁？', { whisper: true });
+      const eavesdrop = findEvent(frames, 'eavesdrop');
+      expect(eavesdrop).toMatchObject({ heard: true });
+      expect(eavesdrop?.listener).toMatchObject({ name: '夜巡人' });
+      expect(chatCalls()).toBe(1);
+
+      const detail = await sceneDetail(app, sceneId);
+      const reaction = detail.messages.at(-1);
+      expect(reaction).toMatchObject({ role: 'assistant', eavesdrop: true });
+      expect(reaction.speakerId).toBe(eavesdrop?.listener?.id);
+      expect(reaction.content).toContain('停了半拍');
+    });
+  });
+
+  it('偷听反应不算作「轮到他说话」，轮转照旧', async () => {
+    await withApp(async ({ app }) => {
+      const { boss, patrol, sceneId } = await threePeople(app);
+
+      // 第一轮：老板接话（轮转 0）；这轮低声被听见 → 多出一条偷听反应
+      forceRandom(0);
+      await speak(app, sceneId, '这句只说给你听。', { whisper: true });
+
+      // 第二句：轮转应该给下一个人（夜巡人），而不是被偷听反应顶掉
+      forceRandom(0.999);
+      await speak(app, sceneId, '另一个问题。');
+
+      const detail = await sceneDetail(app, sceneId);
+      const replies = detail.messages.filter(
+        (message: any) => message.role === 'assistant' && !message.eavesdrop,
+      );
+      expect(replies.map((message: any) => message.speakerId)).toEqual([boss, patrol]);
+    });
+  });
+
+  it('没听见的人不会在之后的发言里知道低声说了什么', async () => {
+    await withApp(async ({ app, requests }) => {
+      const { cat, sceneId } = await threePeople(app);
+
+      forceRandom(0.999);
+      await speak(app, sceneId, '码头那批货有问题。', { whisper: true });
+
+      // 下一个开口的人被指定成猫：他当时没听见，提示词里只能是占位文本
+      await speak(app, sceneId, '@猫 你怎么看？');
+      const prompt = requests
+        .at(-1)!
+        .messages.map((message) => message.content)
+        .join('\n');
+      expect(prompt).not.toContain('码头那批货有问题');
+      expect(prompt).toContain('没听清');
+
+      // 而他自己这一句是听得见的，不该被误伤
+      expect(cat).toBeTruthy();
+      expect(prompt).toContain('你怎么看');
+    });
+  });
+
+  it('敏感内容会记成「他记住了」', async () => {
+    await withApp(async ({ app, requests }) => {
+      const { sceneId } = await threePeople(app);
+      forceRandom(0);
+
+      const frames = await speak(app, sceneId, '名单上最后一个人到底是谁？', { whisper: true });
+      const eavesdrop = findEvent(frames, 'eavesdrop');
+      expect(eavesdrop).toMatchObject({ heard: true, sensitive: true });
+
+      // 最后一条请求就是偷听反应的提示词：里面要带着他的秘密，否则反应戳不到点
+      const reactionPrompt = requests
+        .at(-1)!
+        .messages.map((message) => message.content)
+        .join('\n');
+      expect(reactionPrompt).toContain('名单上最后一个人是他自己');
+      expect(reactionPrompt).toContain('你听见的是');
+
+      // 下一轮任何人开口都能看到「他记住了」这条事实
+      forceRandom(0.999);
+      await speak(app, sceneId, '刚说到哪了？');
+      const laterPrompt = requests
+        .at(-1)!
+        .messages.map((message) => message.content)
+        .join('\n');
+      expect(laterPrompt).toContain('听见了你压低声音说的话');
+    });
+  });
+});
+
+describe('私密场景', () => {
+  it('把在场的人带到后巷：留下的人看见了，公共场景里他不再是「在场」', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const patrol = await seedCharacter(app, '夜巡人');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss, patrol]);
+      await speak(app, sceneId, '先坐会儿。');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/private`,
+        payload: { characterId: boss },
+      });
+      expect(response.statusCode).toBe(200);
+      const result = response.json().data;
+
+      expect(result.scene).toMatchObject({
+        kind: 'private',
+        name: '后巷',
+        sourceSceneId: sceneId,
+      });
+      // 留下的人就是目击者
+      expect(result.noticed).toEqual([{ id: patrol, name: '夜巡人' }]);
+
+      const privateDetail = await sceneDetail(app, result.scene.id);
+      expect(privateDetail.present.map((person: any) => person.id)).toEqual([boss]);
+
+      const publicDetail = await sceneDetail(app, sceneId);
+      expect(publicDetail.present.map((person: any) => person.id)).toEqual([patrol]);
+      // 离开这件事写进场景日志里（system 消息，不进模型历史）
+      const log = publicDetail.messages.filter((message: any) => message.role === 'system');
+      expect(log.at(-1).content).toContain('你带着月灯老板离开了');
+      expect(log.at(-1).content).toContain('夜巡人看见了');
+    });
+  });
+
+  it('联系不上的人带不走：走了的、在忙的各有各的说法', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const patrol = await seedCharacter(app, '夜巡人');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss, patrol]);
+
+      // 在忙：走不开
+      await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/presence`,
+        payload: { characterId: patrol, busyWith: '巡街' },
+      });
+      const busy = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/private`,
+        payload: { characterId: patrol },
+      });
+      expect(busy.statusCode).toBe(422);
+      expect(busy.json().error.message).toContain('忙着');
+
+      // 已经走了：等下次遇见
+      await app.inject({ method: 'DELETE', url: `/api/world/scenes/${sceneId}/presence/${boss}` });
+      const left = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/private`,
+        payload: { characterId: boss },
+      });
+      expect(left.statusCode).toBe(422);
+      expect(left.json().error.message).toContain('已经走了');
+
+      // 从没来过的人：这里没有他
+      const stranger = await seedCharacter(app, '过路人');
+      const absent = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/private`,
+        payload: { characterId: stranger },
+      });
+      expect(absent.statusCode).toBe(422);
+      expect(absent.json().error.message).toContain('不在这里');
+    });
+  });
+
+  it('私密场景里没有第三人，低声也不算被偷听', async () => {
+    await withApp(async ({ app, chatCalls }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/private`,
+        payload: { characterId: boss },
+      });
+      const privateId = created.json().data.scene.id as string;
+
+      const frames = await speak(app, privateId, '在这儿说话没人听得见吧？', { whisper: true });
+      expect(frames.some((frame) => frame.type === 'eavesdrop')).toBe(false);
+      expect(chatCalls()).toBe(0);
+    });
+  });
+
+  it('从后巷回来：人跟着一起回到酒馆，日志里留下「你们回来了」', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+      await speak(app, sceneId, '走，说点别的。');
+
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/private`,
+        payload: { characterId: boss },
+      });
+      const privateId = created.json().data.scene.id as string;
+
+      const back = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${privateId}/return`,
+      });
+      expect(back.statusCode).toBe(200);
+      expect(back.json().data.scene.id).toBe(sceneId);
+
+      const publicDetail = await sceneDetail(app, sceneId);
+      expect(publicDetail.present.map((person: any) => person.id)).toEqual([boss]);
+      const log = publicDetail.messages.filter((message: any) => message.role === 'system');
+      expect(log.at(-1).content).toContain('回到了');
+
+      // 回来之后还能接着说话
+      const frames = await speak(app, sceneId, '刚才说的那件事。');
+      expect(frames.some((frame) => frame.type === 'saved')).toBe(true);
+    });
+  });
+
+  it('公开场景没有可回的地方，私密场景不能再拉一次人', async () => {
+    await withApp(async ({ app }) => {
+      const boss = await seedCharacter(app, '月灯老板');
+      const { sceneId } = await seedSave(app, '月灯镇', [boss]);
+
+      const badReturn = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/return`,
+      });
+      expect(badReturn.statusCode).toBe(400);
+
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${sceneId}/private`,
+        payload: { characterId: boss },
+      });
+      const privateId = created.json().data.scene.id as string;
+
+      const again = await app.inject({
+        method: 'POST',
+        url: `/api/world/scenes/${privateId}/private`,
+        payload: { characterId: boss },
+      });
+      expect(again.statusCode).toBe(400);
+      expect(again.json().error.message).toContain('已经在一个私密场景里');
     });
   });
 });

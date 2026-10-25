@@ -1,4 +1,4 @@
-﻿import { randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AppendMessageInput, Message, MessageUsage } from '@tavern/shared';
 
@@ -18,6 +18,8 @@ interface MessageRow {
   role: string;
   kind: string;
   speaker_id: string | null;
+  whisper: number;
+  eavesdrop: number;
   content: string;
   swipes: string;
   swipe_index: number;
@@ -63,6 +65,8 @@ function rowToMessage(row: MessageRow): Message {
     role: row.role as Message['role'],
     kind: (row.kind as Message['kind']) ?? 'speak',
     speakerId: row.speaker_id ?? null,
+    whisper: Number(row.whisper ?? 0) === 1,
+    eavesdrop: Number(row.eavesdrop ?? 0) === 1,
     content: row.content,
     swipes: parseSwipes(row.swipes),
     swipeIndex: row.swipe_index,
@@ -130,9 +134,10 @@ export function createMessageRepository(db: DatabaseSync): MessageRepository {
 
       db.prepare(
         `INSERT INTO messages (
-          id, conversation_id, parent_id, role, kind, speaker_id, content, swipes, swipe_index,
-          model, provider, usage, finish_reason, duration_ms, first_token_ms, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+          id, conversation_id, parent_id, role, kind, speaker_id, whisper, eavesdrop, content,
+          swipes, swipe_index, model, provider, usage, finish_reason, duration_ms,
+          first_token_ms, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         conversationId,
@@ -140,6 +145,8 @@ export function createMessageRepository(db: DatabaseSync): MessageRepository {
         input.role,
         input.kind ?? 'speak',
         input.speakerId ?? null,
+        input.whisper ? 1 : 0,
+        input.eavesdrop ? 1 : 0,
         input.content,
         swipes,
         input.model ?? null,

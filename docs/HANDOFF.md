@@ -8,7 +8,7 @@
 本地 AI 角色扮演酒馆：Vue3 前端 + Fastify/SQLite 后端，pnpm monorepo。
 仓库 `C:\Users\jingy\Desktop\vork01`，远端 `github.com/yaya358/cangku01`（main）。
 
-**当前状态**：54 个提交 / 289 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
+**当前状态**：55 个提交 / 324 个用例通过 / lint 与全仓 typecheck 干净 / 远端已同步。
 
 ```bash
 pnpm install && pnpm dev     # 后端 8787 + 前端 5173
@@ -31,8 +31,8 @@ pnpm -r run typecheck && pnpm lint
 |---|---|---|
 | 1 | 场景对话接口（在场者接话） | ✅ 已完成（`routes/world.ts`） |
 | 2 | 前端场景视图 | ✅ 已完成（`views/SceneView.vue` + `GET /api/world/scenes/:id`） |
-| 3 | 私聊场景 + 低声 + 偷听 | ⬜ **接下来做这个** |
-| 4 | 好感度打分 + 阈值解锁 | ⬜ |
+| 3 | 私聊场景 + 低声 + 偷听 | ✅ 已完成（`core/world/eavesdrop.ts`、`whisper.ts`、场景私聊接口） |
+| 4 | 好感度打分 + 阈值解锁 | ⬜ **接下来做这个** |
 | 5 | 主线章节 + 情报本侧栏 | ⬜ |
 | 6 | 旧会话迁移成私密场景 | ⬜ |
 
@@ -50,13 +50,27 @@ pnpm -r run typecheck && pnpm lint
 - 场景会话**不进** `/api/conversations` 列表（`scene_id IS NOT NULL` 的过滤）：
   它属于场景，列到旧对话里会被当成角色私聊，点进去说话会搅乱场景上下文
 
-### 第 3 步：私聊 + 低声 + 偷听
+### 第 3 步：私聊 + 低声 + 偷听（已完成，要点留着备查）
 
-- `messages.whisper` 字段已存在（迁移 11），未使用
-- 私聊 = 新建 `kind='private'` 的场景 + 把两人 `enter` 进去；离开公共场景时要能被注意到
-- 偷听概率：`whisper`(大幅降低) × 场景 `closeness`(0.3 嘈杂 / 0.7 安静) × 偷听者性格 × 是否在忙
-- 命中后要**生成偷听者的反应**插入对话流（不是弹提示），敏感内容还要掉好感
-- 未命中也要给确定反馈（"没人注意到"），否则玩家无法判断安全感
+- **低声不是第六种 kind**：`MessageKind` 仍是五种，`messages` 上多了 `whisper`/`eavesdrop` 两个布尔。
+  低声 = 「说话 + whisper 标记」，提示词里换成「压低声音说」（`pipeline.ts` 的 `wrapUserInput`）。
+- **偷听判定是纯函数**（`core/world/eavesdrop.ts`）：
+  `基础率（低声 0.1 / 正常 0.45）× (0.5 + closeness) × 爱打听 1.4 × 在忙 0.45`，夹在 0.01~0.95。
+  「爱打听」从 tags + personality 里认（好奇/多话/话痨/爱打听/爱追问/多嘴/八卦/curious）——
+  角色卡没有 curious 字段，硬加一个没人填，不如认人话。随机源可注入，所以测得准。
+- **命中**：单独一次非流式调用生成「偷听者的反应」（`buildReactionPrompt`），
+  存成 `assistant` + `eavesdrop = 1` 的消息插进对话流，同时写一条 fact（之后他再开口是知道这事的）；
+  敏感内容（秘密里的特征片段被提到）会在提示词里把秘密递给他，让他被刺到但不点破。
+- **没命中**：也要给确定反馈 —— 落一条 `system` 消息「没人注意到你压低了声音。」，并回一帧 SSE `eavesdrop`。
+  system 消息进不了模型历史（两处都过滤 `role !== 'system'`），所以只给玩家看。
+- **低声要说给谁听**（`core/world/whisper.ts`）：正主 = 回答这句低声话的那条助手消息的发言人；
+  听见的人 = 之后标了 `eavesdrop` 的反应。其余在场者看到的是占位文本「没听清内容」。
+  这就是「压低声音」真正的价值 —— 不然没听见的人下一轮照样能引用原话。
+- **私密场景**：`POST /api/world/scenes/:id/private`（只在公开场景、只能带 available 的人，
+  在忙/已走/不在场各给各的说法），`POST /api/world/scenes/:id/return` 把人带回去。
+  离开与回程都写进原场景日志 + fact，并在 `scenes.source_scene_id` 记住回程。
+- 新增上下文层 `scene`（此刻的地方 + 在场的人 + 「他压低声音说，旁边的人未必听得见」），
+  这是让模型不把不在场的人拉进来说话的关键。
 
 ### 第 4 步：好感度
 
@@ -91,6 +105,12 @@ pnpm -r run typecheck && pnpm lint
     放 `%TEMP%` 下跑。
 13. **本机端口上的旧后端可能是「不带 watch」起的**（`node --import tsx src/index.ts`），
     改完代码它不会自己重启 —— 新接口 404 先怀疑这个，杀掉重起 `pnpm dev:server`。
+14. **deepseek-flash 是推理模型：`maxTokens` 给紧了正文会是空的**。
+    它先写推理再写正文，上限 120 时推理就把 120 吃光，返回 `text: ""` + `finishReason: "length"`。
+    短回复（偷听反应那类）别设 `maxTokens`，长度用提示词约束。
+15. **PowerShell 的 `Get-Content` / `Set-Content` 会毁掉中文**（第 3 条那个坑真的踩了）：
+    这台机器上的 `pwsh` 其实是 Windows PowerShell 5.1，默认按 GBK 读文件，
+    反向修复也救不回来（非法字节已经变成 `?`）。批量改文本用 `edit` 工具或 node 脚本。
 
 ## 五、风格约束
 

@@ -136,6 +136,16 @@ export function worldScenePresenceMemberEndpoint(id: string, characterId: string
   return `${worldScenePresenceEndpoint(id)}/${encodeURIComponent(characterId)}`;
 }
 
+/** 把在场的人带到私密场景（后巷 / 账房）。 */
+export function worldScenePrivateEndpoint(id: string): string {
+  return `${worldSceneEndpoint(id)}/private`;
+}
+
+/** 从私密场景回到原来那个公开场景（把人一起带回来）。 */
+export function worldSceneReturnEndpoint(id: string): string {
+  return `${worldSceneEndpoint(id)}/return`;
+}
+
 /** 世界书条目集合。 */
 export const WORLDBOOK_ENDPOINT = `${API_PREFIX}/worldbook`;
 

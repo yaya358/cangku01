@@ -24,6 +24,14 @@ export interface PrepareInput {
   userName?: string;
   /** 这句是说的、做的还是想的（决定 prompt 里怎么套壳） */
   userInputKind?: 'speak' | 'act' | 'think' | 'narrate' | 'ooc';
+  /** 这句是压低声音说的（世界模式） */
+  whisper?: boolean;
+  /** 此刻的场景与在场的人（世界模式） */
+  scene?: {
+    name: string;
+    kind?: 'public' | 'private';
+    others?: readonly { name: string; busyWith?: string | null }[];
+  };
   /** 玩家身份：你是谁、你图什么。不传时角色会把你当陌生人 */
   player?: { name?: string; role?: string; goal?: string };
   /** 本轮触发的剧本事件（到点发生的剧情） */
@@ -101,6 +109,8 @@ export function prepareConversationContext(input: PrepareInput): PreparedContext
     history,
     userInput,
     ...(input.userInputKind ? { userInputKind: input.userInputKind } : {}),
+    ...(input.whisper ? { whisper: true } : {}),
+    ...(input.scene ? { scene: input.scene } : {}),
     worldbook: toWorldbookLayers(worldbook.hits),
     ...(input.events && input.events.length > 0 ? { events: input.events } : {}),
     ...(input.facts && input.facts.length > 0 ? { facts: input.facts } : {}),

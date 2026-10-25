@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Message } from '@tavern/shared';
 import { childrenOf, listLeaves, resolveThread, summarizeBranches } from './thread.js';
 
@@ -11,6 +11,8 @@ function msg(id: string, parentId: string | null, content: string, at: number): 
     role: id.startsWith('a') ? 'assistant' : 'user',
     kind: 'speak',
     speakerId: null,
+    whisper: false,
+    eavesdrop: false,
     content,
     swipes: [],
     swipeIndex: 0,

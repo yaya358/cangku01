@@ -32,6 +32,8 @@ export const SceneSchema = z.object({
   kind: SceneKindSchema,
   /** 0-1，越大越安静（低声说话越容易被人听到）；嘈杂酒馆 0.3，后巷 0.7 */
   closeness: z.number(),
+  /** 私密场景是从哪个公开场景出去的；公开场景为 null */
+  sourceSceneId: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -80,6 +82,18 @@ export const SceneDetailSchema = z.object({
   messages: z.array(MessageSchema),
 });
 export type SceneDetail = z.infer<typeof SceneDetailSchema>;
+
+/**
+ * 把在场的人带到私密场景的结果。
+ *
+ * noticed 是「看见你们离开的人」—— 空数组的意思是没人注意，这本身也是情报：
+ * 换地方不是免费的，但也不一定被抓到。
+ */
+export const PrivateSceneResultSchema = z.object({
+  scene: SceneSchema,
+  noticed: z.array(SceneCastMemberSchema),
+});
+export type PrivateSceneResult = z.infer<typeof PrivateSceneResultSchema>;
 
 /** 新建存档：顺带建第一个场景，并把这些人放进去。 */
 export const CreateSaveSchema = z.object({
