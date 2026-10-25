@@ -15,11 +15,38 @@
       </div>
 
       <div class="chat__actions">
+        <div v-if="branches.length > 1" class="branches">
+          <button
+            class="tool"
+            type="button"
+            :disabled="branchIndex <= 0 || streaming"
+            title="上一条时间线"
+            @click="store.switchBranch(branches[branchIndex - 1]!.leafId)"
+          >
+            ‹
+          </button>
+          <span class="branches__count"> 分支 {{ branchIndex + 1 }}/{{ branches.length }} </span>
+          <button
+            class="tool"
+            type="button"
+            :disabled="branchIndex >= branches.length - 1 || streaming"
+            title="下一条时间线"
+            @click="store.switchBranch(branches[branchIndex + 1]!.leafId)"
+          >
+            ›
+          </button>
+        </div>
         <RouterLink v-if="character" class="chat__link" :to="`/characters/${character.id}`">
           角色设定
         </RouterLink>
       </div>
     </header>
+
+    <div v-if="branchFrom" class="branch-banner">
+      <span class="branch-banner__mark" aria-hidden="true">⑂</span>
+      <span> 正在从「{{ branchFrom.preview }}…」开新分支，发送后原来那条时间线会保留 </span>
+      <button class="tool" type="button" @click="store.cancelBranch()">取消分支</button>
+    </div>
 
     <n-alert v-if="error" type="error" :title="error" closable @close="store.clearError()" />
 
@@ -73,6 +100,15 @@
           >
             重说
           </button>
+          <button
+            class="tool"
+            type="button"
+            :disabled="streaming || bubble.optimistic"
+            title="从这句话开一条新的时间线"
+            @click="store.startBranch(bubble.id, bubble.content)"
+          >
+            分支
+          </button>
         </div>
 
         <p v-if="bubble.meta && bubble.role === 'assistant'" class="bubble__meta">
@@ -114,7 +150,8 @@ import { useChatStore } from '@/stores/chat';
 
 const route = useRoute();
 const store = useChatStore();
-const { messages, loading, streaming, error, conversation, isEmpty } = storeToRefs(store);
+const { messages, loading, streaming, error, conversation, isEmpty, branches, branchFrom } =
+  storeToRefs(store);
 
 const draft = ref('');
 const character = ref<Character | null>(null);
@@ -123,6 +160,13 @@ const logRef = ref<HTMLElement | null>(null);
 const canSend = computed(
   () => !streaming.value && !!conversation.value && draft.value.trim().length > 0,
 );
+
+/** 当前在第几条分支上（branches 按叶子创建时间排序）。 */
+const branchIndex = computed(() => {
+  const leaf = conversation.value?.activeLeafId;
+  const index = branches.value.findIndex((branch) => branch.leafId === leaf);
+  return index < 0 ? 0 : index;
+});
 
 function submit(): void {
   if (!canSend.value) return;
@@ -392,6 +436,41 @@ onBeforeUnmount(() => {
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 10.5px;
+}
+
+/* 分支切换 */
+.branches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.branches__count {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.branch-banner {
+  display: flex;
+  padding: 8px 12px;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed rgba(224, 167, 94, 0.45);
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.branch-banner__mark {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.branch-banner .tool {
+  margin-left: auto;
 }
 
 .chat__input {

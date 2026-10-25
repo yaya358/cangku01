@@ -448,3 +448,127 @@ describe('重说（/regenerate）', () => {
     });
   });
 });
+
+describe('对话树分支', () => {
+  it('从任意一条消息分叉，两支各自独立', async () => {
+    await withApp(async ({ app }) => {
+      const characterId = await seedCharacter(app);
+      const conversation = (
+        await app.inject({ method: 'POST', url: '/api/conversations', payload: { characterId } })
+      ).json().data;
+
+      const greeting = (
+        await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
+      ).json().data.messages[0];
+
+      const address = await app.listen({ host: '127.0.0.1', port: 0 });
+
+      // 第一支：正常聊一句
+      await fetch(`${address}/api/conversations/${conversation.id}/stream`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: '来一杯' }),
+      }).then((response) => response.text());
+
+      const firstBranch = (
+        await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
+      ).json().data;
+      expect(firstBranch.messages.map((m: { content: string }) => m.content)).toEqual([
+        '哟，这个点还来？',
+        '来一杯',
+        '酒来了',
+      ]);
+      const firstLeaf = firstBranch.messages.at(-1).id;
+
+      // 第二支：从开场白之后换条路走
+      await fetch(`${address}/api/conversations/${conversation.id}/stream`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: '换条路走', parentId: greeting.id }),
+      }).then((response) => response.text());
+
+      const afterBranch = (
+        await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
+      ).json().data;
+
+      // 当前分支只剩新的一支，旧支不在里面
+      expect(afterBranch.messages.map((m: { content: string }) => m.content)).toEqual([
+        '哟，这个点还来？',
+        '换条路走',
+        '酒来了2',
+      ]);
+      // 两个叶子 = 两条分支
+      expect(afterBranch.branches).toHaveLength(2);
+      expect(
+        afterBranch.branches.map((b: { messageCount: number }) => b.messageCount).sort(),
+      ).toEqual([3, 3]);
+
+      // 切回第一支
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/conversations/${conversation.id}`,
+        payload: { activeLeafId: firstLeaf },
+      });
+
+      const switched = (
+        await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
+      ).json().data;
+      expect(switched.messages.map((m: { content: string }) => m.content)).toEqual([
+        '哟，这个点还来？',
+        '来一杯',
+        '酒来了',
+      ]);
+      // 两支都还在，一条消息都没丢
+      const total = app.messages().count(conversation.id);
+      expect(total).toBe(5);
+    });
+  });
+
+  it('指定不存在的 parentId 返回 404', async () => {
+    await withApp(async ({ app }) => {
+      const characterId = await seedCharacter(app);
+      const conversation = (
+        await app.inject({ method: 'POST', url: '/api/conversations', payload: { characterId } })
+      ).json().data;
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/conversations/${conversation.id}/stream`,
+        payload: { content: '接不上的话', parentId: 'ghost' },
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  it('查询参数 leafId 可以临时看某一支，不改会话状态', async () => {
+    await withApp(async ({ app }) => {
+      const characterId = await seedCharacter(app);
+      const conversation = (
+        await app.inject({ method: 'POST', url: '/api/conversations', payload: { characterId } })
+      ).json().data;
+
+      const greeting = (
+        await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
+      ).json().data.messages[0];
+
+      const address = await app.listen({ host: '127.0.0.1', port: 0 });
+      await fetch(`${address}/api/conversations/${conversation.id}/stream`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: '换条路', parentId: greeting.id }),
+      }).then((response) => response.text());
+
+      // 会话的 activeLeaf 指向新支，但用 leafId 仍能看到旧支（只有开场白）
+      const peek = await app.inject({
+        method: 'GET',
+        url: `/api/conversations/${conversation.id}?leafId=${greeting.id}`,
+      });
+      expect(peek.json().data.messages).toHaveLength(1);
+
+      const voice = (
+        await app.inject({ method: 'GET', url: `/api/conversations/${conversation.id}` })
+      ).json().data;
+      expect(voice.messages).toHaveLength(3);
+    });
+  });
+});

@@ -29,8 +29,15 @@ export function createConversation(characterId: string, title?: string): Promise
   });
 }
 
-export function fetchConversation(id: string): Promise<ConversationDetail> {
-  return apiGet<ConversationDetail>(conversationEndpoint(id), { timeoutMs: 15_000 });
+/** 读取会话。传 leafId 可以临时看某一支（不改会话状态）。 */
+export function fetchConversation(id: string, leafId?: string): Promise<ConversationDetail> {
+  const suffix = leafId ? `?leafId=${encodeURIComponent(leafId)}` : '';
+  return apiGet<ConversationDetail>(`${conversationEndpoint(id)}${suffix}`, { timeoutMs: 15_000 });
+}
+
+/** 切换当前分支（改 activeLeafId）。 */
+export function switchBranch(id: string, leafId: string): Promise<Conversation> {
+  return apiPatch<Conversation>(conversationEndpoint(id), { activeLeafId: leafId });
 }
 
 export function renameConversation(id: string, title: string): Promise<Conversation> {
@@ -70,12 +77,15 @@ export interface SendTurnHandlers {
 export async function sendTurn(
   conversationId: string,
   content: string,
-  handlers: SendTurnHandlers,
+  handlers: SendTurnHandlers & { parentId?: string },
 ): Promise<void> {
   const response = await fetch(conversationStreamEndpoint(conversationId), {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({
+      content,
+      ...(handlers.parentId ? { parentId: handlers.parentId } : {}),
+    }),
     signal: handlers.signal,
   });
 

@@ -109,6 +109,51 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('CREATE INDEX idx_messages_parent ON messages (parent_id)');
     },
   },
+  {
+    version: 4,
+    name: 'backfill-thread',
+    up: (db) => {
+      /**
+       * 回填 parent_id，把历史数据从「一堆散消息」补成一条链。
+       *
+       * 分支功能依赖 parent 链行得通：早期写入的用户消息没有 parent，
+       * 解析线程时会断在中间。规则很朴素 —— 每条消息的父 = 同一会话里
+       * 创建时间比它早、且最晚的那条（同毫秒用 rowid 兜底）。
+       */
+      db.exec(`
+        UPDATE messages
+        SET parent_id = (
+          SELECT prev.id
+          FROM messages AS prev
+          WHERE prev.conversation_id = messages.conversation_id
+            AND (prev.created_at < messages.created_at
+                 OR (prev.created_at = messages.created_at AND prev.rowid < messages.rowid))
+          ORDER BY prev.created_at DESC, prev.rowid DESC
+          LIMIT 1
+        )
+        WHERE parent_id IS NULL
+          AND EXISTS (
+            SELECT 1 FROM messages AS prev
+            WHERE prev.conversation_id = messages.conversation_id
+              AND (prev.created_at < messages.created_at
+                   OR (prev.created_at = messages.created_at AND prev.rowid < messages.rowid))
+          )
+      `);
+
+      // active_leaf_id 也补齐：指向每个会话最后一条消息
+      db.exec(`
+        UPDATE conversations
+        SET active_leaf_id = (
+          SELECT id FROM messages
+          WHERE messages.conversation_id = conversations.id
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT 1
+        )
+        WHERE active_leaf_id IS NULL
+          AND EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id)
+      `);
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */

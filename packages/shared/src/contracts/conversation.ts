@@ -95,10 +95,24 @@ export const EditMessageSchema = z.object({
 });
 export type EditMessageInput = z.infer<typeof EditMessageSchema>;
 
-/** 会话详情：会话 + 消息（线性视图）。 */
+/** 一条分支的摘要（对话树切换器用）。 */
+export const BranchSummarySchema = z.object({
+  leafId: z.string(),
+  messageCount: z.number().int().nonnegative(),
+  preview: z.string(),
+});
+export type BranchSummary = z.infer<typeof BranchSummarySchema>;
+
+/**
+ * 会话详情：会话 + 当前分支的消息 + 所有分支。
+ *
+ * messages 取的是「根 → activeLeafId」这条路径，不是全部消息 ——
+ * 否则分叉的两支会混在一起。
+ */
 export const ConversationDetailSchema = z.object({
   conversation: ConversationSchema,
   messages: z.array(MessageSchema),
+  branches: z.array(BranchSummarySchema),
 });
 export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 
@@ -107,11 +121,15 @@ export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
  *
  * 这一轮会发生：写入 user 消息 → 组装上下文 → 流式生成 → 写入 assistant 消息。
  * 所以前端不需要自己管落库，刷新后记录仍在。
+ *
+ * `parentId` 指向要接在哪条消息之后：不传就接在当前叶子后面（正常聊天），
+ * 传了就是从那条消息分叉出新的一条时间线（原来那支保留）。
  */
 export const SendMessageSchema = z.object({
   content: z.string().min(1, '消息不能为空').max(20_000),
   provider: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   userName: z.string().min(1).max(40).optional(),
+  parentId: z.string().min(1).optional(),
 });
 export type SendMessageInput = z.infer<typeof SendMessageSchema>;

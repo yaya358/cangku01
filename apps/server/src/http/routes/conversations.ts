@@ -12,6 +12,7 @@ import type { ServerResponse } from 'node:http';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { prepareConversationContext } from '../../core/context/index.js';
+import { resolveThread, summarizeBranches } from '../../core/chat/thread.js';
 import type { ProviderAdapter } from '../../core/provider/index.js';
 import type { AppInstance } from '../../types/fastify.js';
 import { resolveProvider } from '../chat-support.js';
@@ -97,9 +98,18 @@ export function registerConversationRoutes(app: AppInstance): void {
     const conversation = app.conversations().getById(id);
     if (!conversation) throw AppError.notFound(`会话不存在: ${id}`);
 
+    const query = request.query as { leafId?: string };
+    const all = app.messages().listByConversation(id);
+    const leafId =
+      typeof query.leafId === 'string' && query.leafId.length > 0
+        ? query.leafId
+        : conversation.activeLeafId;
+
     return success(request.id, {
       conversation,
-      messages: app.messages().listByConversation(id),
+      // 只返回当前分支：分叉的两支不能混在一起
+      messages: resolveThread(all, leafId),
+      branches: summarizeBranches(all),
     });
   });
 
@@ -182,14 +192,30 @@ export function registerConversationRoutes(app: AppInstance): void {
     const conversationsRepo = app.conversations();
     const messagesRepo = app.messages();
 
-    // 历史（线性视图，跳过 system）
-    const history: ChatMessage[] = messagesRepo
-      .listByConversation(id)
+    const all = messagesRepo.listByConversation(id);
+
+    /**
+     * 接在哪条消息之后：
+     *   - 传了 parentId → 从那条消息分叉（原来那一支保留，形成新分支）
+     *   - 没传         → 接在当前叶子后面（正常聊天）
+     */
+    const parentId = body.parentId ?? conversation.activeLeafId;
+    if (parentId) {
+      const parent = all.find((message) => message.id === parentId);
+      if (!parent) throw AppError.notFound(`要接续的消息不存在: ${parentId}`);
+    }
+
+    // 历史 = 从根到 parent 的那条路径（跳过 system）；分叉时自然只带一条支线
+    const history: ChatMessage[] = resolveThread(all, parentId)
       .filter((message) => message.role !== 'system')
       .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
 
     // 先把用户这句写库：即使生成失败，也不会丢「我说过什么」
-    const userMessage = messagesRepo.append(id, { role: 'user', content: body.content });
+    const userMessage = messagesRepo.append(id, {
+      role: 'user',
+      content: body.content,
+      ...(parentId ? { parentId } : {}),
+    });
 
     const prepared = prepareConversationContext({
       character,

@@ -1,4 +1,4 @@
-import type { ChatStreamPayload, Conversation, Message } from '@tavern/shared';
+import type { BranchSummary, ChatStreamPayload, Conversation, Message } from '@tavern/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { ApiError } from '@/api/client';
@@ -10,6 +10,7 @@ import {
   regenerateMessage,
   selectSwipe,
   sendTurn,
+  switchBranch as switchBranchApi,
 } from '@/api/conversations';
 
 /** 渲染用的消息：库里来的 + 正在流式生成的那条。 */
@@ -39,6 +40,10 @@ export const useChatStore = defineStore('chat', () => {
   const conversation = ref<Conversation | null>(null);
   const messages = ref<ChatBubble[]>([]);
   const list = ref<Conversation[]>([]);
+  /** 所有分支（叶子）摘要 */
+  const branches = ref<BranchSummary[]>([]);
+  /** 分叉模式：下一条消息接在哪条消息之后 */
+  const branchFrom = ref<{ messageId: string; preview: string } | null>(null);
   const loading = ref(false);
   const streaming = ref(false);
   const error = ref<string | null>(null);
@@ -90,10 +95,13 @@ export const useChatStore = defineStore('chat', () => {
       const detail = await fetchConversation(id);
       conversation.value = detail.conversation;
       messages.value = detail.messages.map(toBubble);
+      branches.value = detail.branches;
+      branchFrom.value = null;
     } catch (cause) {
       error.value = describeError(cause);
       conversation.value = null;
       messages.value = [];
+      branches.value = [];
     } finally {
       loading.value = false;
     }
@@ -122,6 +130,8 @@ export const useChatStore = defineStore('chat', () => {
     if (!current || text.length === 0 || streaming.value) return;
 
     error.value = null;
+    // 分叉点：这次发送要接在哪条消息后面（null = 接在当前叶子后面）
+    const parentId = branchFrom.value?.messageId;
 
     // 乐观插入用户消息：等 saved 事件回来再换成真实 id
     const tempUserId = `tmp-u-${++seq}`;
@@ -158,6 +168,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await sendTurn(current.id, text, {
         signal: controller.signal,
+        ...(parentId ? { parentId } : {}),
         onEvent: (event: ChatStreamPayload) => {
           switch (event.type) {
             case 'delta': {
@@ -209,6 +220,38 @@ export const useChatStore = defineStore('chat', () => {
       }
       // 会话的 updatedAt/preview 变了，顺手刷新一下元信息
       void refreshMeta();
+      // 分叉发送完成后清掉分叉点，后续消息接在新叶子后面
+      if (parentId) branchFrom.value = null;
+    }
+  }
+
+  /** 进入分叉模式：下一条消息接在这条消息之后。 */
+  function startBranch(messageId: string, preview: string): void {
+    if (streaming.value) return;
+    branchFrom.value = { messageId, preview: preview.slice(0, 40) };
+  }
+
+  function cancelBranch(): void {
+    branchFrom.value = null;
+  }
+
+  /** 切换到另一条分支（改 activeLeafId 后重新读会话）。 */
+  async function switchBranch(leafId: string): Promise<void> {
+    const current = conversation.value;
+    if (!current || streaming.value || current.activeLeafId === leafId) return;
+
+    loading.value = true;
+    error.value = null;
+    try {
+      await switchBranchApi(current.id, leafId);
+      const detail = await fetchConversation(current.id);
+      conversation.value = detail.conversation;
+      messages.value = detail.messages.map(toBubble);
+      branches.value = detail.branches;
+    } catch (cause) {
+      error.value = describeError(cause);
+    } finally {
+      loading.value = false;
     }
   }
 
@@ -313,6 +356,8 @@ export const useChatStore = defineStore('chat', () => {
     conversation,
     messages,
     list,
+    branches,
+    branchFrom,
     loading,
     streaming,
     error,
@@ -325,6 +370,9 @@ export const useChatStore = defineStore('chat', () => {
     send,
     regenerate,
     switchSwipe,
+    startBranch,
+    cancelBranch,
+    switchBranch,
     stop,
     removeConversation,
     clearError,
