@@ -224,6 +224,9 @@
             <n-input v-model:value="form.tags" placeholder="酒馆, 日常" />
           </div>
         </article>
+
+        <!-- 世界书：按关键词注入的设定，聊到这里才生效 -->
+        <WorldbookPanel v-if="character" :character-id="character.id" />
       </div>
     </template>
 
@@ -245,6 +248,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { updateCharacter, exportCardJson, exportCardPngUrl, uploadAvatar } from '@/api/characters';
 import { toAvatarPng } from '@/api/avatar';
 import ContextPreviewDrawer from '@/components/ContextPreviewDrawer.vue';
+import WorldbookPanel from '@/components/WorldbookPanel.vue';
 import { useChatStore } from '@/stores/chat';
 import { useCharacterStore } from '@/stores/characters';
 import { formatDateTime } from '@/utils/format';

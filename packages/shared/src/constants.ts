@@ -100,3 +100,11 @@ export function messageSwipeSelectEndpoint(id: string): string {
 export function messageRegenerateEndpoint(id: string): string {
   return `${messageEndpoint(id)}/regenerate`;
 }
+
+/** 世界书条目集合。 */
+export const WORLDBOOK_ENDPOINT = `${API_PREFIX}/worldbook`;
+
+/** 单个世界书条目。 */
+export function worldbookEntryEndpoint(id: string): string {
+  return `${WORLDBOOK_ENDPOINT}/${encodeURIComponent(id)}`;
+}
