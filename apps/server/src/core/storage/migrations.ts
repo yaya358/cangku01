@@ -276,6 +276,55 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('ALTER TABLE messages ADD COLUMN speaker_id TEXT');
     },
   },
+  {
+    version: 11,
+    name: 'world-saves-scenes',
+    up: (db) => {
+      /**
+       * 世界存档：存档 → 场景 → 在场者。
+       *
+       * 会话不再按角色分，而是按「地方」分；人在场景里进进出出，
+       * 你只能在能联系上他的时候跟他说话。
+       */
+      db.exec(`
+        CREATE TABLE saves (
+          id         TEXT PRIMARY KEY,
+          name       TEXT NOT NULL,
+          chapter    INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE scenes (
+          id         TEXT PRIMARY KEY,
+          save_id    TEXT NOT NULL REFERENCES saves (id) ON DELETE CASCADE,
+          name       TEXT NOT NULL,
+          kind       TEXT NOT NULL DEFAULT 'public',
+          closeness  REAL NOT NULL DEFAULT 0.3,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      db.exec('CREATE INDEX idx_scenes_save ON scenes (save_id)');
+
+      db.exec(`
+        CREATE TABLE presence (
+          scene_id     TEXT NOT NULL REFERENCES scenes (id) ON DELETE CASCADE,
+          character_id TEXT NOT NULL REFERENCES characters (id) ON DELETE CASCADE,
+          entered_turn INTEGER NOT NULL,
+          left_turn    INTEGER,
+          busy_with    TEXT,
+          PRIMARY KEY (scene_id, character_id)
+        )
+      `);
+      db.exec('CREATE INDEX idx_presence_scene ON presence (scene_id)');
+
+      db.exec('ALTER TABLE conversations ADD COLUMN scene_id TEXT');
+      db.exec('ALTER TABLE messages ADD COLUMN whisper INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 /** 当前代码期望的数据库版本。 */
