@@ -18,6 +18,7 @@
 
           <nav class="nav">
             <RouterLink class="nav__link" to="/">概览</RouterLink>
+            <RouterLink class="nav__link" to="/worlds">世界</RouterLink>
             <RouterLink class="nav__link" to="/conversations">对话</RouterLink>
             <RouterLink class="nav__link" to="/characters">角色</RouterLink>
             <RouterLink class="nav__link" to="/playground">试话</RouterLink>

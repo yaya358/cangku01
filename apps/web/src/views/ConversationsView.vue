@@ -36,41 +36,51 @@
       —— 挑几个人同场轮流接话，等价于「进一个场景」，保留是为了兼容旧记录。
     </p>
 
-    <!-- 场景：世界模式的入口。旧对话迁移过来之后也在这里，不藏在库里 -->
-    <section v-if="scenes.length > 0" class="scenes">
+    <!-- 场景：世界模式的入口。按世界分组 —— 四个题材的场景混在一张表里太乱 -->
+    <section v-if="sceneGroups.length > 0" class="scenes">
       <div class="scenes__head">
         <h2 class="scenes__title">场景</h2>
-        <span class="scenes__hint">点进去就是那个地方 —— 在场的人才会接你的话</span>
+        <span class="scenes__hint">按世界分开；点进去就是那个地方 —— 在场的人才会接你的话</span>
       </div>
 
-      <ul class="scene-list">
-        <li v-for="item in scenes" :key="item.id">
-          <RouterLink class="scene-item" :to="`/scenes/${item.id}`">
-            <span class="scene-item__badge" :class="`scene-item__badge--${item.kind}`">
-              {{ item.kind === 'private' ? '私聊' : '公开' }}
-            </span>
+      <div v-for="group in sceneGroups" :key="group.saveId" class="scene-group">
+        <div class="scene-group__head">
+          <span class="scene-group__name">{{ group.saveName }}</span>
+          <span class="scene-group__theme">{{ group.themeName }}</span>
+          <span class="scene-group__meta">
+            第 {{ group.chapter }} 章 · {{ group.scenes.length }} 个场景
+          </span>
+        </div>
 
-            <span class="scene-item__main">
-              <span class="scene-item__row">
-                <span class="scene-item__name">{{ item.name }}</span>
-                <span class="scene-item__time">{{ relativeTime(item.updatedAt) }}</span>
+        <ul class="scene-list">
+          <li v-for="item in group.scenes" :key="item.id">
+            <RouterLink class="scene-item" :to="`/scenes/${item.id}`">
+              <span class="scene-item__badge" :class="`scene-item__badge--${item.kind}`">
+                {{ item.kind === 'private' ? '私聊' : '公开' }}
               </span>
-              <span class="scene-item__row">
-                <span class="scene-item__preview">{{ item.preview || '（还没有人开口）' }}</span>
-                <span v-if="item.messageCount > 0" class="chat-item__badge">
-                  {{ item.messageCount }}
+
+              <span class="scene-item__main">
+                <span class="scene-item__row">
+                  <span class="scene-item__name">{{ item.name }}</span>
+                  <span class="scene-item__time">{{ relativeTime(item.updatedAt) }}</span>
+                </span>
+                <span class="scene-item__row">
+                  <span class="scene-item__preview">{{ item.preview || '（还没有人开口）' }}</span>
+                  <span v-if="item.messageCount > 0" class="chat-item__badge">
+                    {{ item.messageCount }}
+                  </span>
+                </span>
+                <span class="scene-item__people">
+                  {{ item.presentCount }} 人在场
+                  <template v-if="item.presentNames.length > 0">
+                    （{{ item.presentNames.join('、') }}）
+                  </template>
                 </span>
               </span>
-              <span class="scene-item__people">
-                {{ item.saveName }} · {{ item.presentCount }} 人在场
-                <template v-if="item.presentNames.length > 0">
-                  （{{ item.presentNames.join('、') }}）
-                </template>
-              </span>
-            </span>
-          </RouterLink>
-        </li>
-      </ul>
+            </RouterLink>
+          </li>
+        </ul>
+      </div>
     </section>
 
     <div v-if="loading" class="conv__loading">
@@ -209,13 +219,13 @@
 </template>
 
 <script setup lang="ts">
-import type { CharacterSummary, Conversation, Player } from '@tavern/shared';
-import { characterAvatarEndpoint } from '@tavern/shared';
+import type { CharacterSummary, Conversation, Player, Save } from '@tavern/shared';
+import { characterAvatarEndpoint, themeById } from '@tavern/shared';
 import { NAlert, NButton, NInput, NModal, NSpin } from 'naive-ui';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { fetchCharacters } from '@/api/characters';
-import { ensureDefaultScene, listAllScenes } from '@/api/world';
+import { ensureDefaultScene, listAllScenes, listSaves } from '@/api/world';
 import type { SceneListItem } from '@/api/world';
 import { useChatStore } from '@/stores/chat';
 import { describeError } from '@/utils/errors';
@@ -228,6 +238,8 @@ const store = useChatStore();
 const list = ref<Conversation[]>([]);
 /** 场景列表：世界模式的入口，也是迁移过来的旧对话的去处 */
 const scenes = ref<SceneListItem[]>([]);
+/** 存档（= 一个世界）：用来给场景分组，并显示各自的题材 */
+const saves = ref<Save[]>([]);
 const characters = ref<CharacterSummary[]>([]);
 const loading = ref(false);
 const keyword = ref('');
@@ -310,11 +322,67 @@ async function load(): Promise<void> {
 /** 场景列表读失败不该挡住页面：旧对话还能接着聊 */
 async function loadScenes(): Promise<void> {
   try {
-    scenes.value = await listAllScenes();
+    const [sceneList, saveList] = await Promise.all([listAllScenes(), listSaves()]);
+    scenes.value = sceneList;
+    saves.value = saveList;
   } catch {
     scenes.value = [];
+    saves.value = [];
   }
 }
+
+/**
+ * 场景按世界分组。
+ *
+ * 四个题材的场景混在一张表里，看起来就是「喜堂」「货舱层」「旧图书室」「酒馆」
+ * 乱七八糟排一排 —— 玩家分不清哪几个是自己的。分组之后一个世界一块。
+ */
+const sceneGroups = computed(() => {
+  const groups = new Map<
+    string,
+    {
+      saveId: string;
+      saveName: string;
+      themeName: string;
+      chapter: number;
+      scenes: SceneListItem[];
+    }
+  >();
+
+  for (const save of saves.value) {
+    groups.set(save.id, {
+      saveId: save.id,
+      saveName: save.name,
+      themeName: themeById(save.theme).name,
+      chapter: save.chapter,
+      scenes: [],
+    });
+  }
+
+  for (const scene of scenes.value) {
+    const group = groups.get(scene.saveId);
+    if (group) {
+      group.scenes.push(scene);
+      continue;
+    }
+    // 没在存档列表里的场景（理论上不会有）也给它一个自己的组，别丢
+    groups.set(scene.saveId, {
+      saveId: scene.saveId,
+      saveName: scene.saveName,
+      themeName: '未知世界',
+      chapter: 0,
+      scenes: [scene],
+    });
+  }
+
+  return [...groups.values()]
+    .filter((group) => group.scenes.length > 0)
+    .sort((left, right) => {
+      const newest = (items: SceneListItem[]): string =>
+        items.reduce((latest, item) => (item.updatedAt > latest ? item.updatedAt : latest), '');
+      return newest(right.scenes) > newest(left.scenes) ? 1 : -1;
+    });
+});
 
 function startWith(character: CharacterSummary): void {
   pending.value = character;
@@ -682,6 +750,39 @@ onMounted(() => {
 .scenes__hint {
   color: var(--text-faint);
   font-size: 11px;
+}
+
+/* 一个世界一块：标题行把它和别的题材隔开，免得四本书的场景连成一片 */
+.scene-group + .scene-group {
+  margin-top: 14px;
+}
+
+.scene-group__head {
+  display: flex;
+  margin-bottom: 4px;
+  padding-bottom: 5px;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.scene-group__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scene-group__theme {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(224, 167, 94, 0.12);
+  color: var(--accent);
+  font-size: 10.5px;
+}
+
+.scene-group__meta {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
 }
 
 .scene-list {

@@ -17,6 +17,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '概览' },
   },
   {
+    path: '/worlds',
+    name: 'worlds',
+    component: () => import('@/views/WorldsView.vue'),
+    meta: { title: '世界' },
+  },
+  {
     path: '/characters',
     name: 'characters',
     component: () => import('@/views/CharactersView.vue'),
